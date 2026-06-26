@@ -33,13 +33,27 @@
             <div class="editor-panel">
                 <div class="editor-header">
                     <span class="badge">Source Code A</span>
-                    <select class="lang-select">
-                        <option value="auto">Auto Detect Language</option>
-                        <option value="python">Python</option>
-                        <option value="javascript">JavaScript</option>
-                        <option value="java">Java</option>
-                        <option value="cpp">C++</option>
-                    </select>
+                    <div class="header-actions">
+                        <label for="fileA" class="upload-label" title="Upload Files">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="12" y1="18" x2="12" y2="12"></line><line x1="9" y1="15" x2="15" y2="15"></line></svg>
+                            <span>File</span>
+                        </label>
+                        <input type="file" id="fileA" class="hidden-input" multiple>
+                        
+                        <label for="folderA" class="upload-label" title="Upload Folder">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path><line x1="12" y1="11" x2="12" y2="17"></line><line x1="9" y1="14" x2="15" y2="14"></line></svg>
+                            <span>Folder</span>
+                        </label>
+                        <input type="file" id="folderA" class="hidden-input" webkitdirectory directory>
+                        
+                        <select class="lang-select">
+                            <option value="auto">Auto Detect Language</option>
+                            <option value="python">Python</option>
+                            <option value="javascript">JavaScript</option>
+                            <option value="java">Java</option>
+                            <option value="cpp">C++</option>
+                        </select>
+                    </div>
                 </div>
                 <div class="editor-container">
                     <textarea id="codeA" spellcheck="false" placeholder="Paste your first code snippet here..."></textarea>
@@ -56,13 +70,27 @@
             <div class="editor-panel">
                 <div class="editor-header">
                     <span class="badge">Source Code B</span>
-                    <select class="lang-select">
-                        <option value="auto">Auto Detect Language</option>
-                        <option value="python">Python</option>
-                        <option value="javascript">JavaScript</option>
-                        <option value="java">Java</option>
-                        <option value="cpp">C++</option>
-                    </select>
+                    <div class="header-actions">
+                        <label for="fileB" class="upload-label" title="Upload Files">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="12" y1="18" x2="12" y2="12"></line><line x1="9" y1="15" x2="15" y2="15"></line></svg>
+                            <span>File</span>
+                        </label>
+                        <input type="file" id="fileB" class="hidden-input" multiple>
+                        
+                        <label for="folderB" class="upload-label" title="Upload Folder">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path><line x1="12" y1="11" x2="12" y2="17"></line><line x1="9" y1="14" x2="15" y2="14"></line></svg>
+                            <span>Folder</span>
+                        </label>
+                        <input type="file" id="folderB" class="hidden-input" webkitdirectory directory>
+                        
+                        <select class="lang-select">
+                            <option value="auto">Auto Detect Language</option>
+                            <option value="python">Python</option>
+                            <option value="javascript">JavaScript</option>
+                            <option value="java">Java</option>
+                            <option value="cpp">C++</option>
+                        </select>
+                    </div>
                 </div>
                 <div class="editor-container">
                     <textarea id="codeB" spellcheck="false" placeholder="Paste the code to compare against..."></textarea>

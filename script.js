@@ -4,6 +4,61 @@ document.addEventListener('DOMContentLoaded', () => {
     const codeBInput = document.getElementById('codeB');
     const resultsPanel = document.getElementById('resultsPanel');
     
+    // File inputs
+    const fileA = document.getElementById('fileA');
+    const folderA = document.getElementById('folderA');
+    const fileB = document.getElementById('fileB');
+    const folderB = document.getElementById('folderB');
+
+    const handleFileUpload = async (event, textArea) => {
+        const files = event.target.files;
+        if (!files || files.length === 0) return;
+
+        let combinedCode = "";
+        for (let i = 0; i < files.length; i++) {
+            const file = files[i];
+            
+            // Skip common ignore directories
+            if (file.webkitRelativePath) {
+                const path = file.webkitRelativePath;
+                if (path.includes('/node_modules/') || path.includes('/.git/') || path.includes('/.idea/') || path.includes('/.vscode/')) {
+                    continue;
+                }
+            }
+
+            // Skip large files to prevent browser freeze
+            if (file.size > 1024 * 1024) continue; // max 1MB per file
+            
+            try {
+                const text = await file.text();
+                // Basic check to see if it looks like binary
+                if (text.includes('\x00')) continue;
+                
+                if (files.length > 1 || file.webkitRelativePath) {
+                    const name = file.webkitRelativePath || file.name;
+                    combinedCode += `// === File: ${name} ===\n`;
+                }
+                combinedCode += text + "\n\n";
+            } catch (err) {
+                console.error("Error reading file", file.name, err);
+            }
+        }
+        
+        if (combinedCode) {
+            textArea.value = combinedCode.trim();
+        } else {
+            alert('No valid text files found.');
+        }
+        
+        // Reset input so the same file can be selected again
+        event.target.value = '';
+    };
+
+    fileA.addEventListener('change', (e) => handleFileUpload(e, codeAInput));
+    folderA.addEventListener('change', (e) => handleFileUpload(e, codeAInput));
+    fileB.addEventListener('change', (e) => handleFileUpload(e, codeBInput));
+    folderB.addEventListener('change', (e) => handleFileUpload(e, codeBInput));
+    
     // Result elements
     const similarityScore = document.getElementById('similarityScore');
     const progressCircle = document.getElementById('progressCircle');
