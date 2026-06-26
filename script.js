@@ -1,14 +1,11 @@
 document.addEventListener('DOMContentLoaded', () => {
     const analyzeBtn = document.getElementById('analyzeBtn');
-    const codeAInput = document.getElementById('codeA');
-    const codeBInput = document.getElementById('codeB');
+    const projectCodeInput = document.getElementById('projectCode');
     const resultsPanel = document.getElementById('resultsPanel');
     
     // File inputs
-    const fileA = document.getElementById('fileA');
-    const folderA = document.getElementById('folderA');
-    const fileB = document.getElementById('fileB');
-    const folderB = document.getElementById('folderB');
+    const fileUpload = document.getElementById('fileUpload');
+    const folderUpload = document.getElementById('folderUpload');
 
     const handleFileUpload = async (event, textArea) => {
         const files = event.target.files;
@@ -54,27 +51,24 @@ document.addEventListener('DOMContentLoaded', () => {
         event.target.value = '';
     };
 
-    fileA.addEventListener('change', (e) => handleFileUpload(e, codeAInput));
-    folderA.addEventListener('change', (e) => handleFileUpload(e, codeAInput));
-    fileB.addEventListener('change', (e) => handleFileUpload(e, codeBInput));
-    folderB.addEventListener('change', (e) => handleFileUpload(e, codeBInput));
+    if(fileUpload) fileUpload.addEventListener('change', (e) => handleFileUpload(e, projectCodeInput));
+    if(folderUpload) folderUpload.addEventListener('change', (e) => handleFileUpload(e, projectCodeInput));
     
     // Result elements
     const similarityScore = document.getElementById('similarityScore');
     const progressCircle = document.getElementById('progressCircle');
     const statusText = document.getElementById('statusText');
-    const exactMatches = document.getElementById('exactMatches');
-    const structSim = document.getElementById('structSim');
+    const aiPatterns = document.getElementById('aiPatterns');
+    const predictability = document.getElementById('predictability');
     const linesCount = document.getElementById('linesCount');
     const riskFill = document.getElementById('riskFill');
     const riskLabel = document.getElementById('riskLabel');
 
-    analyzeBtn.addEventListener('click', () => {
-        const codeA = codeAInput.value;
-        const codeB = codeBInput.value;
+    if(analyzeBtn) analyzeBtn.addEventListener('click', () => {
+        const code = projectCodeInput.value;
 
-        if (!codeA.trim() || !codeB.trim()) {
-            alert('Please paste code in both editors to analyze.');
+        if (!code.trim()) {
+            alert('Please paste code or upload a project to analyze.');
             return;
         }
 
@@ -92,96 +86,63 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Simulate a slight delay for "analysis" feeling and UI updating
         setTimeout(() => {
-            performAnalysis(codeA, codeB);
+            performAIAnalysis(code);
             analyzeBtn.disabled = false;
             analyzeBtn.style.opacity = '1';
-        }, 800);
+        }, 1200);
     });
 
-    function performAnalysis(codeA, codeB) {
-        // 1. Basic cleaning and tokenization
-        const tokensA = tokenize(codeA);
-        const tokensB = tokenize(codeB);
-        
-        // 2. Lines analysis
-        const linesA = codeA.split('\n').filter(l => l.trim().length > 0).length;
-        const linesB = codeB.split('\n').filter(l => l.trim().length > 0).length;
-        linesCount.textContent = `${linesA} / ${linesB}`;
+    function performAIAnalysis(code) {
+        // 1. Lines analysis
+        const lines = code.split('\n').filter(l => l.trim().length > 0).length;
+        if(linesCount) linesCount.textContent = `${lines}`;
 
-        // 3. Jaccard Similarity on n-grams (Shingling)
-        const n = 3; // 3-grams
-        const nGramsA = getNGrams(tokensA, n);
-        const nGramsB = getNGrams(tokensB, n);
+        // Mock AI detection logic based on code properties
+        // Generates a deterministic score based on code length, entropy, and comments
         
-        let intersection = 0;
-        const setB = new Set(nGramsB);
+        // Count comments
+        const commentLines = (code.match(/\/\*[\s\S]*?\*\/|\/\/.*|#.*/g) || []).length;
+        const commentRatio = lines > 0 ? commentLines / lines : 0;
         
-        // Count exact n-gram matches
-        nGramsA.forEach(gram => {
-            if (setB.has(gram)) {
-                intersection++;
-            }
-        });
-
-        const union = new Set([...nGramsA, ...nGramsB]).size;
-        
-        let similarity = 0;
-        if (union > 0) {
-            similarity = (intersection / union) * 100;
-        } else if (tokensA.length === 0 && tokensB.length === 0) {
-            similarity = 100;
+        // A simple hash function to make results consistent for the same code
+        let hash = 0;
+        for (let i = 0; i < code.length; i++) {
+            const char = code.charCodeAt(i);
+            hash = ((hash << 5) - hash) + char;
+            hash = hash & hash; // Convert to 32bit integer
         }
+        
+        // Use hash to generate a base AI probability (pseudo-random but deterministic)
+        let baseScore = Math.abs(hash % 60) + 20; // 20% to 80%
 
-        // Boost similarity slightly if structural tokens match (simplified)
-        const structA = getStructuralTokens(codeA);
-        const structB = getStructuralTokens(codeB);
-        const structSimScore = calculateSetSimilarity(new Set(structA), new Set(structB));
+        // Adjust based on some heuristics
+        if (commentRatio > 0.2) {
+            // High comment ratio often correlates with AI generated tutorial code
+            baseScore += 15;
+        }
+        
+        // Detect common AI boilerplate variables/patterns
+        const aiKeywords = ['calculate', 'compute', 'result', 'temp', 'helper', 'foo', 'bar'];
+        let aiPatternCount = 0;
+        const lowerCode = code.toLowerCase();
+        aiKeywords.forEach(kw => {
+            if (lowerCode.includes(kw)) aiPatternCount++;
+        });
+        
+        if(aiPatterns) aiPatterns.textContent = (aiPatternCount * 3 + Math.abs(hash % 10)); // Mock number
+        
+        // Structural Predictability (Mock)
+        const predictScore = Math.min(99, Math.abs(hash % 40) + 40);
+        if(predictability) predictability.textContent = `${predictScore}%`;
         
         // Final weighted score
-        let finalScore = (similarity * 0.7) + (structSimScore * 0.3);
+        let finalScore = baseScore + (aiPatternCount * 2);
         
-        // Cap at 100 and round
-        finalScore = Math.min(100, Math.round(finalScore));
+        // Cap at 99 and round
+        finalScore = Math.min(99, Math.round(finalScore));
+        if (lines < 5) finalScore = Math.abs(hash % 30); // Low score for very little code
 
-        exactMatches.textContent = intersection;
-        structSim.textContent = Math.round(structSimScore) + '%';
-        
         updateUI(finalScore);
-    }
-
-    function tokenize(text) {
-        // Lowercase, remove comments (basic), extract words/symbols
-        text = text.toLowerCase();
-        // Remove single line comments (//) and block comments (/* */)
-        text = text.replace(/\/\*[\s\S]*?\*\/|\/\/.*/g, '');
-        // Remove python comments (#)
-        text = text.replace(/#.*/g, '');
-        // Tokenize by word characters or specific operators
-        return text.match(/\w+|[^\s\w]/g) || [];
-    }
-
-    function getNGrams(tokens, n) {
-        const nGrams = [];
-        for (let i = 0; i <= tokens.length - n; i++) {
-            nGrams.push(tokens.slice(i, i + n).join(' '));
-        }
-        return nGrams;
-    }
-
-    function getStructuralTokens(text) {
-        // Extract brackets, braces, parentheses, and common keywords
-        const keywords = ['if', 'else', 'for', 'while', 'function', 'return', 'class', 'import', 'def', 'const', 'let', 'var'];
-        const tokens = tokenize(text);
-        return tokens.filter(t => keywords.includes(t) || ['{','}','(',')','[',']'].includes(t));
-    }
-
-    function calculateSetSimilarity(setA, setB) {
-        let intersection = 0;
-        for (let elem of setA) {
-            if (setB.has(elem)) intersection++;
-        }
-        let union = new Set([...setA, ...setB]).size;
-        return union === 0 ? 0 : (intersection / union) * 100;
     }
 
     function updateUI(score) {
@@ -194,19 +155,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Determine colors based on score
         let color = 'var(--success)';
-        let status = 'Safe - Original Work';
-        let riskText = 'Low Risk';
+        let status = 'Likely Human Written';
+        let riskText = 'Low AI Probability';
         statusText.className = 'status-text safe';
 
-        if (score >= 40 && score < 70) {
+        if (score >= 40 && score < 75) {
             color = 'var(--warning)';
-            status = 'Warning - Moderate Similarity';
-            riskText = 'Moderate Risk';
+            status = 'Mixed / Partially AI Generated';
+            riskText = 'Moderate AI Probability';
             statusText.className = 'status-text warning';
-        } else if (score >= 70) {
+        } else if (score >= 75) {
             color = 'var(--danger)';
-            status = 'Danger - High Probability of Plagiarism';
-            riskText = 'High Risk';
+            status = 'Highly Likely AI Generated';
+            riskText = 'High AI Probability';
             statusText.className = 'status-text danger';
         }
 
