@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CodeGuard | Advanced Plagiarism Detector</title>
+    <meta name="description" content="Check any programming language code for plagiarism and similarity.">
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="background-animation"></div>
+    
+    <header class="navbar">
+        <div class="logo">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path><polyline points="14 2 14 8 20 8"></polyline><path d="M12 18v-6"></path><path d="M8 15h8"></path></svg>
+            <span>CodeGuard</span>
+        </div>
+        <div class="nav-links">
+            <a href="#" class="active">Scanner</a>
+            <a href="#">History</a>
+            <a href="#">Settings</a>
+        </div>
+    </header>
+
+    <main class="container">
+        <div class="hero-section">
+            <h1>Detect Code Similarity Instantly</h1>
+            <p>Paste your source code below to analyze similarities. Supports all major programming languages.</p>
+        </div>
+
+        <div class="scanner-layout">
+            <div class="editor-panel">
+                <div class="editor-header">
+                    <span class="badge">Source Code A</span>
+                    <select class="lang-select">
+                        <option value="auto">Auto Detect Language</option>
+                        <option value="python">Python</option>
+                        <option value="javascript">JavaScript</option>
+                        <option value="java">Java</option>
+                        <option value="cpp">C++</option>
+                    </select>
+                </div>
+                <div class="editor-container">
+                    <textarea id="codeA" spellcheck="false" placeholder="Paste your first code snippet here..."></textarea>
+                </div>
+            </div>
+
+            <div class="action-panel">
+                <button id="analyzeBtn" class="glow-button">
+                    <span class="btn-text">Analyze</span>
+                    <svg class="btn-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12h4l3-9 5 18 3-9h5"/></svg>
+                </button>
+            </div>
+
+            <div class="editor-panel">
+                <div class="editor-header">
+                    <span class="badge">Source Code B</span>
+                    <select class="lang-select">
+                        <option value="auto">Auto Detect Language</option>
+                        <option value="python">Python</option>
+                        <option value="javascript">JavaScript</option>
+                        <option value="java">Java</option>
+                        <option value="cpp">C++</option>
+                    </select>
+                </div>
+                <div class="editor-container">
+                    <textarea id="codeB" spellcheck="false" placeholder="Paste the code to compare against..."></textarea>
+                </div>
+            </div>
+        </div>
+
+        <div id="resultsPanel" class="results-panel hidden">
+            <h2>Analysis Results</h2>
+            <div class="results-grid">
+                <div class="result-card primary">
+                    <div class="circular-progress" id="progressCircle">
+                        <span class="progress-value" id="similarityScore">0%</span>
+                    </div>
+                    <h3>Overall Similarity</h3>
+                    <p class="status-text" id="statusText">Awaiting Analysis</p>
+                </div>
+                <div class="result-details">
+                    <div class="detail-item">
+                        <span class="detail-label">Exact Matches (Tokens)</span>
+                        <span class="detail-value" id="exactMatches">0</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">Structural Similarity</span>
+                        <span class="detail-value" id="structSim">0%</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">Lines Analyzed</span>
+                        <span class="detail-value" id="linesCount">0 / 0</span>
+                    </div>
+                    <div class="risk-indicator">
+                        <div class="risk-bar">
+                            <div class="risk-fill" id="riskFill"></div>
+                        </div>
+                        <span class="risk-label" id="riskLabel">Low Risk</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script src="script.js"></script>
+</body>
+</html>
