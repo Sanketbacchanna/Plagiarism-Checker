@@ -164,11 +164,15 @@ document.addEventListener('DOMContentLoaded', () => {
             status = 'Mixed / Partially AI Generated';
             riskText = 'Moderate AI Probability';
             statusText.className = 'status-text warning';
+            showRecommendations(score);
         } else if (score >= 75) {
             color = 'var(--danger)';
             status = 'Highly Likely AI Generated';
             riskText = 'High AI Probability';
             statusText.className = 'status-text danger';
+            showRecommendations(score);
+        } else {
+            hideRecommendations();
         }
 
         statusText.textContent = status;
@@ -186,5 +190,41 @@ document.addEventListener('DOMContentLoaded', () => {
             similarityScore.textContent = Math.round(currentScore) + '%';
             progressCircle.style.background = `conic-gradient(${color} ${currentScore * 3.6}deg, var(--bg-primary) 0deg)`;
         }, intervalTime);
+    }
+
+    function showRecommendations(score) {
+        const recommendationsPanel = document.getElementById('recommendationsPanel');
+        const recommendationsList = document.getElementById('recommendationsList');
+        if(!recommendationsPanel || !recommendationsList) return;
+
+        recommendationsPanel.classList.remove('hidden');
+        recommendationsList.innerHTML = '';
+
+        const tips = [
+            "Add custom, meaningful comments explaining the 'why' behind the logic, not just 'what' the code does.",
+            "Refactor standard boilerplate structures into more custom, project-specific abstractions.",
+            "Incorporate unique variable and function names that map directly to your specific business domain.",
+            "Avoid generic variable names like 'temp', 'data', 'helper', or 'result' commonly used by AI.",
+            "Use less predictable control flows where appropriate to break generic algorithmic patterns.",
+            "Write custom error handling with specific edge cases instead of using generic try-catch blocks."
+        ];
+
+        // Give more tips for higher scores
+        let numTips = score >= 75 ? 4 : 2;
+        
+        // Randomly select tips based on a simple pseudo-random approach using the score to keep it stable
+        for(let i=0; i<numTips; i++) {
+            const tipIndex = (score + i * 3) % tips.length;
+            const li = document.createElement('li');
+            li.innerHTML = `<svg class="tip-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg><span>${tips[tipIndex]}</span>`;
+            recommendationsList.appendChild(li);
+        }
+    }
+
+    function hideRecommendations() {
+        const recommendationsPanel = document.getElementById('recommendationsPanel');
+        if(recommendationsPanel) {
+            recommendationsPanel.classList.add('hidden');
+        }
     }
 });
