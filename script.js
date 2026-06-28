@@ -92,57 +92,132 @@ document.addEventListener('DOMContentLoaded', () => {
         }, 1200);
     });
 
+    const logicalComplexity = document.getElementById('logicalComplexity');
+    const commentDensity = document.getElementById('commentDensity');
+
     function performAIAnalysis(code) {
-        // 1. Lines analysis
-        const lines = code.split('\n').filter(l => l.trim().length > 0).length;
-        if(linesCount) linesCount.textContent = `${lines}`;
+        if (!code) return;
 
-        // Mock AI detection logic based on code properties
-        // Generates a deterministic score based on code length, entropy, and comments
-        
-        // Count comments
-        const commentLines = (code.match(/\/\*[\s\S]*?\*\/|\/\/.*|#.*/g) || []).length;
-        const commentRatio = lines > 0 ? commentLines / lines : 0;
-        
-        // A simple hash function to make results consistent for the same code
-        let hash = 0;
-        for (let i = 0; i < code.length; i++) {
-            const char = code.charCodeAt(i);
-            hash = ((hash << 5) - hash) + char;
-            hash = hash & hash; // Convert to 32bit integer
-        }
-        
-        // Use hash to generate a base AI probability (pseudo-random but deterministic)
-        let baseScore = Math.abs(hash % 60) + 20; // 20% to 80%
+        const lines = code.split('\n');
+        const nonEmptyLines = lines.filter(l => l.trim().length > 0);
+        const numLines = nonEmptyLines.length;
+        if(linesCount) linesCount.textContent = `${numLines}`;
 
-        // Adjust based on some heuristics
-        if (commentRatio > 0.2) {
-            // High comment ratio often correlates with AI generated tutorial code
-            baseScore += 15;
+        if (numLines === 0) {
+            updateUI(0);
+            return;
         }
+
+        // 1. Comment Density
+        let commentLines = 0;
+        let inBlockComment = false;
         
-        // Detect common AI boilerplate variables/patterns
-        const aiKeywords = ['calculate', 'compute', 'result', 'temp', 'helper', 'foo', 'bar'];
+        // 2. Cyclomatic Complexity & Logical structure
+        let complexity = 0;
+        const keywords = ['if', 'else', 'for', 'while', 'switch', 'case', 'catch', '&&', '||', '=>'];
+        
+        // 3. AI specific patterns / Generic variables
+        const aiKeywords = ['calculate', 'compute', 'result', 'temp', 'helper', 'foo', 'bar', 'data', 'item', 'index', 'value'];
         let aiPatternCount = 0;
-        const lowerCode = code.toLowerCase();
-        aiKeywords.forEach(kw => {
-            if (lowerCode.includes(kw)) aiPatternCount++;
-        });
         
-        if(aiPatterns) aiPatterns.textContent = (aiPatternCount * 3 + Math.abs(hash % 10)); // Mock number
-        
-        // Structural Predictability (Mock)
-        const predictScore = Math.min(99, Math.abs(hash % 40) + 40);
-        if(predictability) predictability.textContent = `${predictScore}%`;
-        
-        // Final weighted score
-        let finalScore = baseScore + (aiPatternCount * 2);
-        
-        // Cap at 99 and round
-        finalScore = Math.min(99, Math.round(finalScore));
-        if (lines < 5) finalScore = Math.abs(hash % 30); // Low score for very little code
+        // 4. Uniformity (predictability) - line lengths
+        let totalLineLength = 0;
 
-        updateUI(finalScore);
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const trimmed = line.trim();
+            
+            if (trimmed.length === 0) continue;
+            totalLineLength += trimmed.length;
+
+            // Comments
+            if (trimmed.startsWith('//') || trimmed.startsWith('#')) {
+                commentLines++;
+            } else if (trimmed.startsWith('/*')) {
+                inBlockComment = true;
+                commentLines++;
+            } else if (trimmed.endsWith('*/') && inBlockComment) {
+                inBlockComment = false;
+                commentLines++;
+            } else if (inBlockComment) {
+                commentLines++;
+            }
+
+            // Complexity
+            const words = trimmed.split(/[\s\(\)\{\}\[\]\;\,]+/);
+            words.forEach(w => {
+                if (keywords.includes(w)) complexity++;
+            });
+            if (trimmed.includes('&&')) complexity++;
+            if (trimmed.includes('||')) complexity++;
+            if (trimmed.includes('=>')) complexity++;
+
+            // AI Patterns
+            const lowerLine = trimmed.toLowerCase();
+            aiKeywords.forEach(kw => {
+                const regex = new RegExp(`\\b${kw}\\b`);
+                if (regex.test(lowerLine)) aiPatternCount++;
+            });
+        }
+
+        const avgLineLength = numLines > 0 ? totalLineLength / numLines : 0;
+        const commentRatio = numLines > 0 ? commentLines / numLines : 0;
+
+        // Calculate a more realistic score based on heuristics
+        let aiScore = 0;
+
+        // Rule 1: High comment density without corresponding complexity might be AI
+        if (commentRatio > 0.15) aiScore += 15;
+        if (commentRatio > 0.3) aiScore += 20;
+        
+        // Very low comments can sometimes be human (or very raw AI)
+        if (commentRatio < 0.05 && numLines > 20) aiScore -= 10;
+
+        // Rule 2: Usage of generic variables (aiPatternCount) vs total lines
+        const patternDensity = aiPatternCount / numLines;
+        if (patternDensity > 0.05) aiScore += 25;
+        if (patternDensity > 0.1) aiScore += 15;
+
+        // Rule 3: Cyclomatic complexity density
+        const complexityDensity = complexity / numLines;
+        if (complexityDensity < 0.05 && numLines > 20) {
+            // Highly verbose but simple logic is often AI
+            aiScore += 25;
+        } else if (complexityDensity > 0.3) {
+            // Highly complex/dense logic leans human (or very advanced prompt)
+            aiScore -= 15;
+        }
+
+        // Rule 4: Average line length is very consistent with standard formatting
+        if (avgLineLength > 30 && avgLineLength < 50) aiScore += 15;
+
+        // Structural predictability based on metrics
+        let predictScore = 30 + (patternDensity * 100) + (commentRatio * 100);
+        predictScore = Math.min(99, Math.round(predictScore));
+
+        // Generate a stable hash to add some jitter
+        let hash = 0;
+        for (let i = 0; i < Math.min(code.length, 500); i++) {
+            hash = ((hash << 5) - hash) + code.charCodeAt(i);
+            hash = hash & hash;
+        }
+        
+        // Apply jitter and bounds
+        aiScore += Math.abs(hash % 10);
+        aiScore = Math.max(5, Math.min(99, Math.round(aiScore)));
+        
+        if (numLines < 5) {
+            aiScore = Math.abs(hash % 30);
+            predictScore = Math.abs(hash % 40);
+        }
+
+        // Update dom elements
+        if(aiPatterns) aiPatterns.textContent = aiPatternCount;
+        if(predictability) predictability.textContent = `${predictScore}%`;
+        if(logicalComplexity) logicalComplexity.textContent = complexity;
+        if(commentDensity) commentDensity.textContent = `${Math.round(commentRatio * 100)}%`;
+
+        updateUI(aiScore);
     }
 
     function updateUI(score) {
