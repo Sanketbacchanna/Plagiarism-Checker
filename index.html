@@ -17,8 +17,8 @@
             <span>CodeGuard</span>
         </div>
         <div class="nav-links">
-            <a href="#" class="active">Scanner</a>
-            <a href="#">History</a>
+            <a href="#" class="active" id="navScanner">Scanner</a>
+            <a href="#" id="navHistory">History</a>
             <a href="#">Settings</a>
         </div>
     </header>
@@ -29,7 +29,7 @@
             <p>Upload a file or an entire project folder to analyze how much of the code was likely written by AI.</p>
         </div>
 
-        <div class="scanner-layout">
+        <div class="scanner-layout" id="scannerPanel">
             <div class="editor-panel">
                 <div class="editor-header">
                     <span class="badge">Project Source Code</span>
@@ -117,6 +117,14 @@
                     <!-- Suggestions will be injected here via JS -->
                 </ul>
             </div>
+        </div>
+
+        <div id="historyPanel" class="history-panel hidden">
+            <h2>Analysis History</h2>
+            <div id="historyList" class="history-list">
+                <!-- History items will be injected here via JS -->
+            </div>
+            <button id="clearHistoryBtn" class="clear-history-btn hidden">Clear History</button>
         </div>
     </main>
 

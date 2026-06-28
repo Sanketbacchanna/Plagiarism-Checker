@@ -218,6 +218,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if(commentDensity) commentDensity.textContent = `${Math.round(commentRatio * 100)}%`;
 
         updateUI(aiScore);
+        saveToHistory(aiScore, numLines);
     }
 
     function updateUI(score) {
@@ -301,5 +302,96 @@ document.addEventListener('DOMContentLoaded', () => {
         if(recommendationsPanel) {
             recommendationsPanel.classList.add('hidden');
         }
+    }
+
+    // --- History Logic ---
+    const navScanner = document.getElementById('navScanner');
+    const navHistory = document.getElementById('navHistory');
+    const scannerPanel = document.getElementById('scannerPanel');
+    const historyPanel = document.getElementById('historyPanel');
+    const historyList = document.getElementById('historyList');
+    const clearHistoryBtn = document.getElementById('clearHistoryBtn');
+
+    function switchTab(tab) {
+        if (tab === 'scanner') {
+            if (navScanner) navScanner.classList.add('active');
+            if (navHistory) navHistory.classList.remove('active');
+            if (scannerPanel) scannerPanel.style.display = 'flex';
+            
+            // Only show results if it was previously analyzed
+            if (resultsPanel && resultsPanel.classList.contains('visible')) {
+                resultsPanel.classList.remove('hidden');
+            }
+            if (historyPanel) historyPanel.classList.add('hidden');
+        } else if (tab === 'history') {
+            if (navHistory) navHistory.classList.add('active');
+            if (navScanner) navScanner.classList.remove('active');
+            if (scannerPanel) scannerPanel.style.display = 'none';
+            if (resultsPanel) resultsPanel.classList.add('hidden');
+            if (historyPanel) historyPanel.classList.remove('hidden');
+            loadHistory();
+        }
+    }
+
+    if (navScanner) navScanner.addEventListener('click', (e) => { e.preventDefault(); switchTab('scanner'); });
+    if (navHistory) navHistory.addEventListener('click', (e) => { e.preventDefault(); switchTab('history'); });
+
+    function saveToHistory(score, lines) {
+        let history = JSON.parse(localStorage.getItem('aiDetectorHistory') || '[]');
+        history.unshift({
+            id: Date.now(),
+            date: new Date().toLocaleString(),
+            score: score,
+            lines: lines
+        });
+        if (history.length > 50) history = history.slice(0, 50);
+        localStorage.setItem('aiDetectorHistory', JSON.stringify(history));
+    }
+
+    function loadHistory() {
+        if (!historyList) return;
+        const history = JSON.parse(localStorage.getItem('aiDetectorHistory') || '[]');
+        
+        if (history.length === 0) {
+            historyList.innerHTML = '<div class="empty-history">No analysis history found. Run a scan to see results here.</div>';
+            if (clearHistoryBtn) clearHistoryBtn.classList.add('hidden');
+            return;
+        }
+
+        if (clearHistoryBtn) clearHistoryBtn.classList.remove('hidden');
+        historyList.innerHTML = '';
+        
+        history.forEach(item => {
+            let colorClass = 'safe';
+            let status = 'Likely Human';
+            if (item.score >= 40 && item.score < 75) {
+                colorClass = 'warning';
+                status = 'Mixed';
+            } else if (item.score >= 75) {
+                colorClass = 'danger';
+                status = 'Likely AI';
+            }
+
+            const div = document.createElement('div');
+            div.className = 'history-item';
+            div.innerHTML = `
+                <div class="history-info">
+                    <h4>Analysis Report</h4>
+                    <div class="history-meta">${item.date} &bull; ${item.lines} lines analyzed</div>
+                </div>
+                <div class="history-score">
+                    <span class="score-value ${colorClass}">${item.score}%</span>
+                    <span class="status-text ${colorClass}">${status}</span>
+                </div>
+            `;
+            historyList.appendChild(div);
+        });
+    }
+
+    if (clearHistoryBtn) {
+        clearHistoryBtn.addEventListener('click', () => {
+            localStorage.removeItem('aiDetectorHistory');
+            loadHistory();
+        });
     }
 });
