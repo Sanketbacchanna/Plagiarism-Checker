@@ -19,7 +19,7 @@
         <div class="nav-links">
             <a href="#" class="active" id="navScanner">Scanner</a>
             <a href="#" id="navHistory">History</a>
-            <a href="#">Settings</a>
+            <a href="#" id="navSettings">Settings</a>
         </div>
     </header>
 
@@ -125,6 +125,49 @@
                 <!-- History items will be injected here via JS -->
             </div>
             <button id="clearHistoryBtn" class="clear-history-btn hidden">Clear History</button>
+        </div>
+
+        <div id="settingsPanel" class="settings-panel hidden">
+            <h2>Scanner Settings</h2>
+            
+            <div class="settings-group">
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <h3>Strict Mode</h3>
+                        <p>Increases sensitivity of AI pattern detection.</p>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="settingStrict">
+                        <span class="slider round"></span>
+                    </label>
+                </div>
+
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <h3>Ignore Comments</h3>
+                        <p>Exclude comments from analysis scoring.</p>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="settingIgnoreComments">
+                        <span class="slider round"></span>
+                    </label>
+                </div>
+                
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <h3>Auto-detect Language</h3>
+                        <p>Automatically determine the programming language.</p>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="settingAutoLang" checked>
+                        <span class="slider round"></span>
+                    </label>
+                </div>
+            </div>
+            
+            <button id="saveSettingsBtn" class="glow-button" style="margin: 2rem auto 0; display: flex;">
+                <span class="btn-text">Save Settings</span>
+            </button>
         </div>
     </main>
 

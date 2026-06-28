@@ -165,13 +165,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Calculate a more realistic score based on heuristics
         let aiScore = 0;
+        const settings = JSON.parse(localStorage.getItem('aiDetectorSettings') || '{"strict": false, "ignoreComments": false, "autoLang": true}');
 
         // Rule 1: High comment density without corresponding complexity might be AI
-        if (commentRatio > 0.15) aiScore += 15;
-        if (commentRatio > 0.3) aiScore += 20;
-        
-        // Very low comments can sometimes be human (or very raw AI)
-        if (commentRatio < 0.05 && numLines > 20) aiScore -= 10;
+        if (!settings.ignoreComments) {
+            if (commentRatio > 0.15) aiScore += 15;
+            if (commentRatio > 0.3) aiScore += 20;
+            
+            // Very low comments can sometimes be human (or very raw AI)
+            if (commentRatio < 0.05 && numLines > 20) aiScore -= 10;
+        }
 
         // Rule 2: Usage of generic variables (aiPatternCount) vs total lines
         const patternDensity = aiPatternCount / numLines;
@@ -204,6 +207,11 @@ document.addEventListener('DOMContentLoaded', () => {
         
         // Apply jitter and bounds
         aiScore += Math.abs(hash % 10);
+        
+        if (settings.strict) {
+            aiScore = aiScore * 1.5 + 20;
+        }
+        
         aiScore = Math.max(5, Math.min(99, Math.round(aiScore)));
         
         if (numLines < 5) {
@@ -304,37 +312,80 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // --- History Logic ---
+    // --- Navigation & Panels ---
     const navScanner = document.getElementById('navScanner');
     const navHistory = document.getElementById('navHistory');
+    const navSettings = document.getElementById('navSettings');
+    
     const scannerPanel = document.getElementById('scannerPanel');
     const historyPanel = document.getElementById('historyPanel');
+    const settingsPanel = document.getElementById('settingsPanel');
     const historyList = document.getElementById('historyList');
     const clearHistoryBtn = document.getElementById('clearHistoryBtn');
 
+    // --- Settings Elements ---
+    const settingStrict = document.getElementById('settingStrict');
+    const settingIgnoreComments = document.getElementById('settingIgnoreComments');
+    const settingAutoLang = document.getElementById('settingAutoLang');
+    const saveSettingsBtn = document.getElementById('saveSettingsBtn');
+
     function switchTab(tab) {
+        if (navScanner) navScanner.classList.remove('active');
+        if (navHistory) navHistory.classList.remove('active');
+        if (navSettings) navSettings.classList.remove('active');
+        
+        if (scannerPanel) scannerPanel.style.display = 'none';
+        if (resultsPanel) resultsPanel.classList.add('hidden');
+        if (historyPanel) historyPanel.classList.add('hidden');
+        if (settingsPanel) settingsPanel.classList.add('hidden');
+
         if (tab === 'scanner') {
             if (navScanner) navScanner.classList.add('active');
-            if (navHistory) navHistory.classList.remove('active');
             if (scannerPanel) scannerPanel.style.display = 'flex';
-            
-            // Only show results if it was previously analyzed
             if (resultsPanel && resultsPanel.classList.contains('visible')) {
                 resultsPanel.classList.remove('hidden');
             }
-            if (historyPanel) historyPanel.classList.add('hidden');
         } else if (tab === 'history') {
             if (navHistory) navHistory.classList.add('active');
-            if (navScanner) navScanner.classList.remove('active');
-            if (scannerPanel) scannerPanel.style.display = 'none';
-            if (resultsPanel) resultsPanel.classList.add('hidden');
             if (historyPanel) historyPanel.classList.remove('hidden');
             loadHistory();
+        } else if (tab === 'settings') {
+            if (navSettings) navSettings.classList.add('active');
+            if (settingsPanel) settingsPanel.classList.remove('hidden');
+            loadSettings();
         }
     }
 
     if (navScanner) navScanner.addEventListener('click', (e) => { e.preventDefault(); switchTab('scanner'); });
     if (navHistory) navHistory.addEventListener('click', (e) => { e.preventDefault(); switchTab('history'); });
+    if (navSettings) navSettings.addEventListener('click', (e) => { e.preventDefault(); switchTab('settings'); });
+
+    function loadSettings() {
+        const settings = JSON.parse(localStorage.getItem('aiDetectorSettings') || '{"strict": false, "ignoreComments": false, "autoLang": true}');
+        if (settingStrict) settingStrict.checked = settings.strict;
+        if (settingIgnoreComments) settingIgnoreComments.checked = settings.ignoreComments;
+        if (settingAutoLang) settingAutoLang.checked = settings.autoLang;
+    }
+
+    if (saveSettingsBtn) {
+        saveSettingsBtn.addEventListener('click', () => {
+            const settings = {
+                strict: settingStrict ? settingStrict.checked : false,
+                ignoreComments: settingIgnoreComments ? settingIgnoreComments.checked : false,
+                autoLang: settingAutoLang ? settingAutoLang.checked : true
+            };
+            localStorage.setItem('aiDetectorSettings', JSON.stringify(settings));
+            
+            const originalText = saveSettingsBtn.innerHTML;
+            saveSettingsBtn.innerHTML = '<span class="btn-text">Saved!</span>';
+            setTimeout(() => {
+                saveSettingsBtn.innerHTML = originalText;
+            }, 1500);
+        });
+    }
+
+    // Load initial settings globally so they are available
+    loadSettings();
 
     function saveToHistory(score, lines) {
         let history = JSON.parse(localStorage.getItem('aiDetectorHistory') || '[]');
