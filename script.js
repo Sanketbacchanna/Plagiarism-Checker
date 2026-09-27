@@ -1,448 +1,746 @@
 document.addEventListener('DOMContentLoaded', () => {
-    const analyzeBtn = document.getElementById('analyzeBtn');
-    const projectCodeInput = document.getElementById('projectCode');
-    const resultsPanel = document.getElementById('resultsPanel');
-    
-    // File inputs
-    const fileUpload = document.getElementById('fileUpload');
-    const folderUpload = document.getElementById('folderUpload');
+    'use strict';
 
-    const handleFileUpload = async (event, textArea) => {
-        const files = event.target.files;
-        if (!files || files.length === 0) return;
+    const $ = (id) => document.getElementById(id);
 
-        let combinedCode = "";
-        for (let i = 0; i < files.length; i++) {
-            const file = files[i];
-            
-            // Skip common ignore directories
-            if (file.webkitRelativePath) {
-                const path = file.webkitRelativePath;
-                if (path.includes('/node_modules/') || path.includes('/.git/') || path.includes('/.idea/') || path.includes('/.vscode/')) {
-                    continue;
-                }
-            }
+    const fileUpload = $('fileUpload');
+    const folderUpload = $('folderUpload');
+    const referenceUpload = $('referenceUpload');
+    const projectCodeInput = $('projectCode');
+    const analysisMode = $('analysisMode');
+    const langSelect = $('langSelect');
+    const analyzeBtn = $('analyzeBtn');
+    const resultsPanel = $('resultsPanel');
+    const scannerPanel = $('scannerPanel');
+    const historyPanel = $('historyPanel');
+    const settingsPanel = $('settingsPanel');
+    const referenceSection = $('referenceSection');
+    const referenceList = $('referenceList');
+    const matchesPanel = $('matchesPanel');
+    const matchesList = $('matchesList');
+    const noCorpusNotice = $('noCorpusNotice');
 
-            // Skip large files to prevent browser freeze
-            if (file.size > 1024 * 1024) continue; // max 1MB per file
-            
-            try {
-                const text = await file.text();
-                // Basic check to see if it looks like binary
-                if (text.includes('\x00')) continue;
-                
-                if (files.length > 1 || file.webkitRelativePath) {
-                    const name = file.webkitRelativePath || file.name;
-                    combinedCode += `// === File: ${name} ===\n`;
-                }
-                combinedCode += text + "\n\n";
-            } catch (err) {
-                console.error("Error reading file", file.name, err);
-            }
-        }
-        
-        if (combinedCode) {
-            textArea.value = combinedCode.trim();
-        } else {
-            alert('No valid text files found.');
-        }
-        
-        // Reset input so the same file can be selected again
-        event.target.value = '';
+    const state = {
+        references: [],
+        lastReport: null,
+        lastMode: 'plagiarism'
     };
 
-    if(fileUpload) fileUpload.addEventListener('change', (e) => handleFileUpload(e, projectCodeInput));
-    if(folderUpload) folderUpload.addEventListener('change', (e) => handleFileUpload(e, projectCodeInput));
-    
-    // Result elements
-    const similarityScore = document.getElementById('similarityScore');
-    const progressCircle = document.getElementById('progressCircle');
-    const statusText = document.getElementById('statusText');
-    const aiPatterns = document.getElementById('aiPatterns');
-    const predictability = document.getElementById('predictability');
-    const linesCount = document.getElementById('linesCount');
-    const riskFill = document.getElementById('riskFill');
-    const riskLabel = document.getElementById('riskLabel');
+    const SUPPORTED_TEXT = new Set([
+        'txt', 'md', 'js', 'ts', 'jsx', 'tsx', 'py', 'java', 'c', 'cpp', 'h', 'hpp',
+        'html', 'css', 'json', 'sql', 'xml', 'yaml', 'yml'
+    ]);
 
-    if(analyzeBtn) analyzeBtn.addEventListener('click', () => {
-        const code = projectCodeInput.value;
+    const IGNORE_PATHS = ['/node_modules/', '/.git/', '/.idea/', '/.vscode/', '/dist/', '/build/'];
+    const MAX_FILE_SIZE = 10 * 1024 * 1024;
 
-        if (!code.trim()) {
-            alert('Please paste code or upload a project to analyze.');
-            return;
+    // -----------------------------
+    // Settings
+    // -----------------------------
+    function getSettings() {
+        try {
+            return {
+                strict: false,
+                ignoreShort: true,
+                autoLang: true,
+                ...JSON.parse(localStorage.getItem('codeGuardSettings') || '{}')
+            };
+        } catch {
+            return { strict: false, ignoreShort: true, autoLang: true };
         }
+    }
 
-        // Show panel if hidden
-        resultsPanel.classList.remove('hidden');
-        resultsPanel.classList.add('visible');
-        
-        // Reset animation
-        progressCircle.style.background = `conic-gradient(var(--bg-primary) 0deg, var(--bg-primary) 0deg)`;
-        similarityScore.textContent = '0%';
-        
-        // Disable button during analysis
-        analyzeBtn.disabled = true;
-        analyzeBtn.style.opacity = '0.7';
+    function loadSettings() {
+        const settings = getSettings();
+        $('settingStrict').checked = !!settings.strict;
+        $('settingIgnoreShort').checked = settings.ignoreShort !== false;
+        $('settingAutoLang').checked = settings.autoLang !== false;
+    }
 
-        // Simulate a slight delay for "analysis" feeling and UI updating
-        setTimeout(() => {
-            performAIAnalysis(code);
-            analyzeBtn.disabled = false;
-            analyzeBtn.style.opacity = '1';
-        }, 1200);
+    $('saveSettingsBtn')?.addEventListener('click', () => {
+        localStorage.setItem('codeGuardSettings', JSON.stringify({
+            strict: $('settingStrict').checked,
+            ignoreShort: $('settingIgnoreShort').checked,
+            autoLang: $('settingAutoLang').checked
+        }));
+        const button = $('saveSettingsBtn');
+        const old = button.textContent;
+        button.textContent = 'Saved!';
+        setTimeout(() => button.textContent = old, 1200);
     });
 
-    const logicalComplexity = document.getElementById('logicalComplexity');
-    const commentDensity = document.getElementById('commentDensity');
+    // -----------------------------
+    // File extraction
+    // -----------------------------
+    function extensionOf(name) {
+        const clean = name.split('?')[0].toLowerCase();
+        return clean.includes('.') ? clean.split('.').pop() : '';
+    }
 
-    function performAIAnalysis(code) {
-        if (!code) return;
+    function shouldIgnore(file) {
+        const path = file.webkitRelativePath || file.name;
+        return IGNORE_PATHS.some(part => path.includes(part));
+    }
 
-        const lines = code.split('\n');
-        const nonEmptyLines = lines.filter(l => l.trim().length > 0);
-        const numLines = nonEmptyLines.length;
-        if(linesCount) linesCount.textContent = `${numLines}`;
+    async function extractPdfText(file) {
+        if (!window.pdfjsLib) throw new Error('PDF.js failed to load. Check your internet connection.');
+        const buffer = await file.arrayBuffer();
+        const pdf = await window.pdfjsLib.getDocument({ data: buffer }).promise;
+        const pages = [];
+        for (let pageNo = 1; pageNo <= pdf.numPages; pageNo++) {
+            const page = await pdf.getPage(pageNo);
+            const content = await page.getTextContent();
+            const text = content.items.map(item => item.str || '').join(' ');
+            pages.push(`\n[Page ${pageNo}]\n${text}`);
+        }
+        return pages.join('\n').trim();
+    }
 
-        if (numLines === 0) {
-            updateUI(0);
+    async function extractDocxText(file) {
+        if (!window.mammoth) throw new Error('Mammoth.js failed to load. Check your internet connection.');
+        const arrayBuffer = await file.arrayBuffer();
+        const result = await window.mammoth.extractRawText({ arrayBuffer });
+        return (result.value || '').trim();
+    }
+
+    async function extractTextFromFile(file) {
+        if (file.size > MAX_FILE_SIZE) {
+            throw new Error(`File is larger than ${MAX_FILE_SIZE / 1024 / 1024} MB.`);
+        }
+
+        const ext = extensionOf(file.name);
+        if (ext === 'docx') return extractDocxText(file);
+        if (ext === 'pdf') return extractPdfText(file);
+        if (SUPPORTED_TEXT.has(ext)) return file.text();
+
+        throw new Error(`Unsupported file type: .${ext || 'unknown'}`);
+    }
+
+    async function addFilesToTextarea(files) {
+        const validFiles = Array.from(files).filter(file => !shouldIgnore(file));
+        if (!validFiles.length) return;
+
+        const chunks = [];
+        const errors = [];
+
+        for (const file of validFiles) {
+            try {
+                const text = await extractTextFromFile(file);
+                if (!text.trim()) continue;
+                const name = file.webkitRelativePath || file.name;
+                chunks.push(validFiles.length > 1 || file.webkitRelativePath
+                    ? `\n===== FILE: ${name} =====\n${text}`
+                    : text);
+            } catch (error) {
+                console.error(error);
+                errors.push(`${file.name}: ${error.message}`);
+            }
+        }
+
+        if (chunks.length) {
+            projectCodeInput.value = chunks.join('\n\n').trim();
+        }
+
+        if (errors.length) {
+            alert(`Some files could not be read:\n\n${errors.slice(0, 8).join('\n')}`);
+        }
+    }
+
+    async function addReferenceFiles(files) {
+        const validFiles = Array.from(files).filter(file => !shouldIgnore(file));
+        const errors = [];
+
+        for (const file of validFiles) {
+            try {
+                const text = await extractTextFromFile(file);
+                if (!text.trim()) continue;
+                state.references.push({
+                    id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+                    name: file.webkitRelativePath || file.name,
+                    text
+                });
+            } catch (error) {
+                console.error(error);
+                errors.push(`${file.name}: ${error.message}`);
+            }
+        }
+
+        renderReferences();
+        if (errors.length) alert(`Some reference files could not be read:\n\n${errors.slice(0, 8).join('\n')}`);
+    }
+
+    fileUpload?.addEventListener('change', async (event) => {
+        await addFilesToTextarea(event.target.files);
+        event.target.value = '';
+    });
+
+    folderUpload?.addEventListener('change', async (event) => {
+        await addFilesToTextarea(event.target.files);
+        event.target.value = '';
+    });
+
+    referenceUpload?.addEventListener('change', async (event) => {
+        await addReferenceFiles(event.target.files);
+        event.target.value = '';
+    });
+
+    // -----------------------------
+    // References UI
+    // -----------------------------
+    function renderReferences() {
+        if (!state.references.length) {
+            referenceList.innerHTML = '<div class="empty-reference">No reference documents added yet.</div>';
             return;
         }
 
-        // 1. Comment Density
-        let commentLines = 0;
-        let inBlockComment = false;
-        
-        // 2. Cyclomatic Complexity & Logical structure
-        let complexity = 0;
-        const keywords = ['if', 'else', 'for', 'while', 'switch', 'case', 'catch', '&&', '||', '=>'];
-        
-        // 3. AI specific patterns / Generic variables
-        const aiKeywords = ['calculate', 'compute', 'result', 'temp', 'helper', 'foo', 'bar', 'data', 'item', 'index', 'value'];
-        let aiPatternCount = 0;
-        
-        // 4. Uniformity (predictability) - line lengths
-        let totalLineLength = 0;
+        referenceList.innerHTML = state.references.map((ref, index) => `
+            <div class="reference-item">
+                <div>
+                    <strong>${escapeHtml(ref.name)}</strong>
+                    <span>${formatNumber(countWords(ref.text))} words</span>
+                </div>
+                <button class="remove-reference" data-index="${index}" title="Remove">Remove</button>
+            </div>
+        `).join('');
 
-        for (let i = 0; i < lines.length; i++) {
-            const line = lines[i];
-            const trimmed = line.trim();
-            
-            if (trimmed.length === 0) continue;
-            totalLineLength += trimmed.length;
-
-            // Comments
-            if (trimmed.startsWith('//') || trimmed.startsWith('#')) {
-                commentLines++;
-            } else if (trimmed.startsWith('/*')) {
-                inBlockComment = true;
-                commentLines++;
-            } else if (trimmed.endsWith('*/') && inBlockComment) {
-                inBlockComment = false;
-                commentLines++;
-            } else if (inBlockComment) {
-                commentLines++;
-            }
-
-            // Complexity
-            const words = trimmed.split(/[\s\(\)\{\}\[\]\;\,]+/);
-            words.forEach(w => {
-                if (keywords.includes(w)) complexity++;
+        referenceList.querySelectorAll('.remove-reference').forEach(button => {
+            button.addEventListener('click', () => {
+                state.references.splice(Number(button.dataset.index), 1);
+                renderReferences();
             });
-            if (trimmed.includes('&&')) complexity++;
-            if (trimmed.includes('||')) complexity++;
-            if (trimmed.includes('=>')) complexity++;
-
-            // AI Patterns
-            const lowerLine = trimmed.toLowerCase();
-            aiKeywords.forEach(kw => {
-                const regex = new RegExp(`\\b${kw}\\b`);
-                if (regex.test(lowerLine)) aiPatternCount++;
-            });
-        }
-
-        const avgLineLength = numLines > 0 ? totalLineLength / numLines : 0;
-        const commentRatio = numLines > 0 ? commentLines / numLines : 0;
-
-        // Calculate a more realistic score based on heuristics
-        let aiScore = 0;
-        const settings = JSON.parse(localStorage.getItem('aiDetectorSettings') || '{"strict": false, "ignoreComments": false, "autoLang": true}');
-
-        // Rule 1: High comment density without corresponding complexity might be AI
-        if (!settings.ignoreComments) {
-            if (commentRatio > 0.15) aiScore += 15;
-            if (commentRatio > 0.3) aiScore += 20;
-            
-            // Very low comments can sometimes be human (or very raw AI)
-            if (commentRatio < 0.05 && numLines > 20) aiScore -= 10;
-        }
-
-        // Rule 2: Usage of generic variables (aiPatternCount) vs total lines
-        const patternDensity = aiPatternCount / numLines;
-        if (patternDensity > 0.05) aiScore += 25;
-        if (patternDensity > 0.1) aiScore += 15;
-
-        // Rule 3: Cyclomatic complexity density
-        const complexityDensity = complexity / numLines;
-        if (complexityDensity < 0.05 && numLines > 20) {
-            // Highly verbose but simple logic is often AI
-            aiScore += 25;
-        } else if (complexityDensity > 0.3) {
-            // Highly complex/dense logic leans human (or very advanced prompt)
-            aiScore -= 15;
-        }
-
-        // Rule 4: Average line length is very consistent with standard formatting
-        if (avgLineLength > 30 && avgLineLength < 50) aiScore += 15;
-
-        // Structural predictability based on metrics
-        let predictScore = 30 + (patternDensity * 100) + (commentRatio * 100);
-        predictScore = Math.min(99, Math.round(predictScore));
-
-        // Generate a stable hash to add some jitter
-        let hash = 0;
-        for (let i = 0; i < Math.min(code.length, 500); i++) {
-            hash = ((hash << 5) - hash) + code.charCodeAt(i);
-            hash = hash & hash;
-        }
-        
-        // Apply jitter and bounds
-        aiScore += Math.abs(hash % 10);
-        
-        if (settings.strict) {
-            aiScore = aiScore * 1.5 + 20;
-        }
-        
-        aiScore = Math.max(5, Math.min(99, Math.round(aiScore)));
-        
-        if (numLines < 5) {
-            aiScore = Math.abs(hash % 30);
-            predictScore = Math.abs(hash % 40);
-        }
-
-        // Update dom elements
-        if(aiPatterns) aiPatterns.textContent = aiPatternCount;
-        if(predictability) predictability.textContent = `${predictScore}%`;
-        if(logicalComplexity) logicalComplexity.textContent = complexity;
-        if(commentDensity) commentDensity.textContent = `${Math.round(commentRatio * 100)}%`;
-
-        updateUI(aiScore);
-        saveToHistory(aiScore, numLines);
+        });
     }
 
-    function updateUI(score) {
-        // Animate circular progress
-        let currentScore = 0;
-        const duration = 1500;
-        const intervalTime = 20;
-        const steps = duration / intervalTime;
-        const increment = score / steps;
+    // -----------------------------
+    // Text normalization + similarity
+    // -----------------------------
+    function normalizeText(text) {
+        return text
+            .normalize('NFKC')
+            .toLowerCase()
+            .replace(/\u00ad/g, '')
+            .replace(/[^\p{L}\p{N}]+/gu, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
 
-        // Determine colors based on score
-        let color = 'var(--success)';
-        let status = 'Likely Human Written';
-        let riskText = 'Low AI Probability';
-        statusText.className = 'status-text safe';
+    function tokenize(text) {
+        const settings = getSettings();
+        const words = normalizeText(text).split(' ').filter(Boolean);
+        return settings.ignoreShort ? words.filter(w => w.length >= 4) : words;
+    }
 
-        if (score >= 40 && score < 75) {
-            color = 'var(--warning)';
-            status = 'Mixed / Partially AI Generated';
-            riskText = 'Moderate AI Probability';
-            statusText.className = 'status-text warning';
-            showRecommendations(score);
-        } else if (score >= 75) {
-            color = 'var(--danger)';
-            status = 'Highly Likely AI Generated';
-            riskText = 'High AI Probability';
-            statusText.className = 'status-text danger';
-            showRecommendations(score);
-        } else {
-            hideRecommendations();
+    function countWords(text) {
+        return normalizeText(text).split(' ').filter(Boolean).length;
+    }
+
+    function createNgrams(words, size) {
+        const grams = [];
+        if (words.length < size) return grams;
+        for (let i = 0; i <= words.length - size; i++) {
+            grams.push(words.slice(i, i + size).join(' '));
+        }
+        return grams;
+    }
+
+    function countOccurrences(haystack, needle) {
+        let count = 0;
+        let start = 0;
+        while (true) {
+            const index = haystack.indexOf(needle, start);
+            if (index === -1) break;
+            count++;
+            start = index + needle.length;
+        }
+        return count;
+    }
+
+    function compareAgainstReference(sourceText, referenceText, sourceName) {
+        const sourceWords = tokenize(sourceText);
+        const referenceWords = tokenize(referenceText);
+        if (!sourceWords.length || !referenceWords.length) {
+            return { score: 0, matchedWords: 0, matchedPhrases: 0, phrases: [] };
         }
 
-        statusText.textContent = status;
-        riskLabel.textContent = riskText;
-        riskFill.style.width = `${score}%`;
-        riskFill.style.backgroundColor = color;
+        const settings = getSettings();
+        const n = settings.strict ? 8 : 6;
+        const sourceGrams = createNgrams(sourceWords, n);
+        const referenceSet = new Set(createNgrams(referenceWords, n));
+        const matchingGrams = sourceGrams.filter(g => referenceSet.has(g));
 
+        // A phrase contains n words. Convert matched n-grams into an estimated
+        // word coverage without double-counting overlapping phrases.
+        const covered = new Set();
+        const phrases = [];
+        const sourceString = sourceWords.join(' ');
+        const refString = referenceWords.join(' ');
+
+        for (const gram of matchingGrams) {
+            const occurrence = countOccurrences(sourceString, gram);
+            if (occurrence > 0 && !phrases.includes(gram)) {
+                phrases.push(gram);
+            }
+        }
+
+        // Mark word positions for each matching n-gram.
+        for (let i = 0; i <= sourceWords.length - n; i++) {
+            const gram = sourceWords.slice(i, i + n).join(' ');
+            if (referenceSet.has(gram)) {
+                for (let j = i; j < i + n; j++) covered.add(j);
+            }
+        }
+
+        const matchedWords = covered.size;
+        const score = sourceWords.length
+            ? Math.min(100, Math.round((matchedWords / sourceWords.length) * 100))
+            : 0;
+
+        // Only show up to 8 example phrases in the UI.
+        const examples = phrases.slice(0, 8).map(phrase => ({
+            phrase,
+            source: sourceName,
+            referenceOccurrences: countOccurrences(refString, phrase)
+        }));
+
+        return {
+            score,
+            matchedWords,
+            matchedPhrases: matchingGrams.length,
+            phrases: examples
+        };
+    }
+
+    function runPlagiarismAnalysis(text) {
+        if (!state.references.length) {
+            return {
+                hasCorpus: false,
+                score: 0,
+                matchedWords: 0,
+                matchedPhrases: 0,
+                sources: [],
+                words: countWords(text),
+                lines: text.split(/\r?\n/).filter(x => x.trim()).length
+            };
+        }
+
+        const sourceResults = state.references.map(ref => {
+            const result = compareAgainstReference(text, ref.text, ref.name);
+            return { ...result, name: ref.name };
+        }).filter(result => result.matchedWords > 0);
+
+        sourceResults.sort((a, b) => b.score - a.score);
+
+        const uniqueMatchedWords = new Set();
+        const sourceWords = tokenize(text);
+        const settings = getSettings();
+        const n = settings.strict ? 8 : 6;
+
+        // Build a union of matching positions across all references so the final
+        // score doesn't exceed 100% just because several references contain the same text.
+        const matchedPositions = new Set();
+        for (const ref of state.references) {
+            const refSet = new Set(createNgrams(tokenize(ref.text), n));
+            for (let i = 0; i <= sourceWords.length - n; i++) {
+                const gram = sourceWords.slice(i, i + n).join(' ');
+                if (refSet.has(gram)) {
+                    for (let j = i; j < i + n; j++) matchedPositions.add(j);
+                }
+            }
+        }
+
+        matchedPositions.forEach(pos => uniqueMatchedWords.add(pos));
+
+        const score = sourceWords.length
+            ? Math.min(100, Math.round((uniqueMatchedWords.size / sourceWords.length) * 100))
+            : 0;
+
+        const examples = [];
+        const seenPhrases = new Set();
+        sourceResults.forEach(result => {
+            result.phrases.forEach(item => {
+                if (!seenPhrases.has(item.phrase) && examples.length < 20) {
+                    seenPhrases.add(item.phrase);
+                    examples.push(item);
+                }
+            });
+        });
+
+        return {
+            hasCorpus: true,
+            score,
+            matchedWords: uniqueMatchedWords.size,
+            matchedPhrases: sourceResults.reduce((sum, r) => sum + r.matchedPhrases, 0),
+            sources: sourceResults.slice(0, 10),
+            phrases: examples,
+            words: sourceWords.length,
+            lines: text.split(/\r?\n/).filter(x => x.trim()).length
+        };
+    }
+
+    // -----------------------------
+    // Code heuristic (clearly labelled as heuristic)
+    // -----------------------------
+    function detectLanguage(text) {
+        const selected = langSelect?.value || 'auto';
+        if (selected !== 'auto') return selected;
+        if (/\b(def|import|from)\b|print\(/.test(text)) return 'python';
+        if (/\b(const|let|var|function)\b|=>|console\.log/.test(text)) return 'javascript';
+        if (/\b(public|private|class|static|void|System\.out)\b/.test(text)) return 'java';
+        if (/#include\s*<|std::|cout\s*<</.test(text)) return 'cpp';
+        return 'unknown';
+    }
+
+    function runCodeAnalysis(code) {
+        const lines = code.split(/\r?\n/);
+        const nonEmpty = lines.filter(line => line.trim());
+        const comments = nonEmpty.filter(line => /^\s*(\/\/|#|<!--|\/\*)/.test(line)).length;
+        const keywords = /\b(if|else|for|while|switch|case|catch|try|&&|\|\||=>)\b/g;
+        const complexity = (code.match(keywords) || []).length;
+        const generic = (code.match(/\b(calculate|compute|result|temp|helper|foo|bar|data|item|index|value)\b/gi) || []).length;
+        const wordCount = countWords(code);
+        const commentDensity = nonEmpty.length ? Math.round((comments / nonEmpty.length) * 100) : 0;
+        const predictability = nonEmpty.length ? Math.min(99, Math.round(30 + (generic / nonEmpty.length) * 100 + commentDensity)) : 0;
+
+        let score = 15;
+        if (generic / Math.max(1, nonEmpty.length) > 0.05) score += 20;
+        if (generic / Math.max(1, nonEmpty.length) > 0.10) score += 15;
+        if (complexity / Math.max(1, nonEmpty.length) < 0.05 && nonEmpty.length > 20) score += 15;
+        if (commentDensity > 30) score += 10;
+        if (getSettings().strict) score += 10;
+        score = Math.max(0, Math.min(99, score));
+
+        return {
+            score,
+            patterns: generic,
+            predictability,
+            complexity,
+            commentDensity,
+            lines: nonEmpty.length,
+            words: wordCount,
+            language: detectLanguage(code)
+        };
+    }
+
+    // -----------------------------
+    // UI
+    // -----------------------------
+    function setMode(mode) {
+        state.lastMode = mode;
+        const codeMode = mode === 'code';
+        referenceSection.classList.toggle('hidden', codeMode);
+        document.querySelectorAll('.code-only-control').forEach(el => el.classList.toggle('hidden-control', !codeMode));
+        $('primaryBadge').textContent = codeMode ? 'Project Source Code' : 'Document to Check';
+        $('modeHelp').textContent = codeMode
+            ? 'This mode is a heuristic source-code analysis. It is not proof of AI authorship.'
+            : 'Upload the document you want to check and one or more reference documents. The similarity percentage is calculated only against the supplied reference corpus.';
+        projectCodeInput.placeholder = codeMode
+            ? 'Paste source code or upload files/folders to analyze...'
+            : 'Upload a DOCX/PDF/TXT document or paste text here...';
+        analyzeBtn.querySelector('.btn-text').textContent = codeMode ? 'Analyze Code' : 'Check Plagiarism';
+        hideResults();
+    }
+
+    analysisMode?.addEventListener('change', () => setMode(analysisMode.value));
+
+    function hideResults() {
+        resultsPanel.classList.add('hidden');
+        resultsPanel.classList.remove('visible');
+    }
+
+    function showResults() {
+        resultsPanel.classList.remove('hidden');
+        resultsPanel.classList.add('visible');
+    }
+
+    function animateScore(score, color) {
+        const progressCircle = $('progressCircle');
+        const scoreElement = $('similarityScore');
+        let current = 0;
+        const step = Math.max(1, score / 50);
         const timer = setInterval(() => {
-            currentScore += increment;
-            if (currentScore >= score) {
-                currentScore = score;
+            current += step;
+            if (current >= score) {
+                current = score;
                 clearInterval(timer);
             }
-            
-            similarityScore.textContent = Math.round(currentScore) + '%';
-            progressCircle.style.background = `conic-gradient(${color} ${currentScore * 3.6}deg, var(--bg-primary) 0deg)`;
-        }, intervalTime);
+            scoreElement.textContent = `${Math.round(current)}%`;
+            progressCircle.style.background = `conic-gradient(${color} ${current * 3.6}deg, var(--bg-primary) 0deg)`;
+        }, 20);
     }
 
-    function showRecommendations(score) {
-        const recommendationsPanel = document.getElementById('recommendationsPanel');
-        const recommendationsList = document.getElementById('recommendationsList');
-        if(!recommendationsPanel || !recommendationsList) return;
+    function scoreColor(score) {
+        if (score >= 50) return 'var(--danger)';
+        if (score >= 20) return 'var(--warning)';
+        return 'var(--success)';
+    }
 
-        recommendationsPanel.classList.remove('hidden');
-        recommendationsList.innerHTML = '';
+    function renderPlagiarismResults(report) {
+        $('resultsTitle').textContent = 'Plagiarism Analysis Results';
+        $('scoreTitle').textContent = 'Similarity';
+        $('metricOneLabel').textContent = 'Matching Words';
+        $('metricTwoLabel').textContent = 'Reference Sources';
+        $('metricThreeLabel').textContent = 'Matched Phrases';
+        $('metricFourLabel').textContent = 'Words Analyzed';
+        $('metricFiveLabel').textContent = 'Lines / Paragraphs';
 
-        const tips = [
-            "Add custom, meaningful comments explaining the 'why' behind the logic, not just 'what' the code does.",
-            "Refactor standard boilerplate structures into more custom, project-specific abstractions.",
-            "Incorporate unique variable and function names that map directly to your specific business domain.",
-            "Avoid generic variable names like 'temp', 'data', 'helper', or 'result' commonly used by AI.",
-            "Use less predictable control flows where appropriate to break generic algorithmic patterns.",
-            "Write custom error handling with specific edge cases instead of using generic try-catch blocks."
-        ];
+        $('metricOneValue').textContent = formatNumber(report.matchedWords);
+        $('metricTwoValue').textContent = report.sources?.length || state.references.length;
+        $('metricThreeValue').textContent = formatNumber(report.matchedPhrases);
+        $('metricFourValue').textContent = formatNumber(report.words);
+        $('metricFiveValue').textContent = formatNumber(report.lines);
 
-        // Give more tips for higher scores
-        let numTips = score >= 75 ? 4 : 2;
-        
-        // Randomly select tips based on a simple pseudo-random approach using the score to keep it stable
-        for(let i=0; i<numTips; i++) {
-            const tipIndex = (score + i * 3) % tips.length;
-            const li = document.createElement('li');
-            li.innerHTML = `<svg class="tip-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg><span>${tips[tipIndex]}</span>`;
-            recommendationsList.appendChild(li);
+        noCorpusNotice.classList.toggle('hidden', report.hasCorpus);
+        matchesPanel.classList.toggle('hidden', !report.hasCorpus || !report.sources.length);
+        $('codeDetailsPanel').classList.add('hidden');
+
+        if (!report.hasCorpus) {
+            $('statusText').textContent = 'Reference corpus required';
+            $('statusText').className = 'status-text warning';
+            $('riskLabel').textContent = 'Cannot calculate external similarity';
+            $('riskFill').style.width = '0%';
+            $('riskFill').style.backgroundColor = 'var(--warning)';
+            animateScore(0, 'var(--warning)');
+            matchesList.innerHTML = '';
+            return;
         }
+
+        const color = scoreColor(report.score);
+        const status = report.score >= 50 ? 'High textual similarity' : report.score >= 20 ? 'Some matching text found' : 'Low textual similarity';
+        $('statusText').textContent = status;
+        $('statusText').className = `status-text ${report.score >= 50 ? 'danger' : report.score >= 20 ? 'warning' : 'safe'}`;
+        $('riskLabel').textContent = report.score >= 50 ? 'High Similarity' : report.score >= 20 ? 'Moderate Similarity' : 'Low Similarity';
+        $('riskFill').style.width = `${report.score}%`;
+        $('riskFill').style.backgroundColor = color;
+        animateScore(report.score, color);
+
+        matchesList.innerHTML = report.sources.map(source => `
+            <div class="match-card">
+                <div class="match-card-head">
+                    <strong>${escapeHtml(source.name)}</strong>
+                    <span class="match-score">${source.score}%</span>
+                </div>
+                <div class="match-meta">${formatNumber(source.matchedWords)} matched words · ${formatNumber(source.matchedPhrases)} matching n-grams</div>
+            </div>
+        `).join('');
+        $('matchSummary').textContent = `${report.sources.length} source(s) with detected overlap`;
     }
 
-    function hideRecommendations() {
-        const recommendationsPanel = document.getElementById('recommendationsPanel');
-        if(recommendationsPanel) {
-            recommendationsPanel.classList.add('hidden');
+    function renderCodeResults(report) {
+        $('resultsTitle').textContent = 'Code Analysis Results';
+        $('scoreTitle').textContent = 'Heuristic AI Probability';
+        $('metricOneLabel').textContent = 'AI-like Patterns';
+        $('metricTwoLabel').textContent = 'Detected Language';
+        $('metricThreeLabel').textContent = 'Logical Complexity';
+        $('metricFourLabel').textContent = 'Comment Density';
+        $('metricFiveLabel').textContent = 'Lines Analyzed';
+        $('metricOneValue').textContent = report.patterns;
+        $('metricTwoValue').textContent = report.language;
+        $('metricThreeValue').textContent = report.complexity;
+        $('metricFourValue').textContent = `${report.commentDensity}%`;
+        $('metricFiveValue').textContent = report.lines;
+        noCorpusNotice.classList.add('hidden');
+        matchesPanel.classList.add('hidden');
+
+        const color = report.score >= 75 ? 'var(--danger)' : report.score >= 40 ? 'var(--warning)' : 'var(--success)';
+        $('statusText').textContent = report.score >= 75 ? 'High heuristic AI signal' : report.score >= 40 ? 'Mixed heuristic signal' : 'Low heuristic signal';
+        $('statusText').className = `status-text ${report.score >= 75 ? 'danger' : report.score >= 40 ? 'warning' : 'safe'}`;
+        $('riskLabel').textContent = 'Heuristic score — not proof of authorship';
+        $('riskFill').style.width = `${report.score}%`;
+        $('riskFill').style.backgroundColor = color;
+        animateScore(report.score, color);
+
+        const list = $('codeDetailsList');
+        list.innerHTML = [
+            `Detected language: ${report.language}`,
+            `Code predictability metric: ${report.predictability}%`,
+            `AI-like keyword/pattern count: ${report.patterns}`,
+            `Logical structure count: ${report.complexity}`,
+            'This score is a local heuristic and should not be presented as definitive AI-authorship evidence.'
+        ].map(text => `<li><span>${escapeHtml(text)}</span></li>`).join('');
+        $('codeDetailsPanel').classList.remove('hidden');
+    }
+
+    analyzeBtn?.addEventListener('click', async () => {
+        const text = projectCodeInput.value.trim();
+        if (!text) {
+            alert('Please paste text/code or upload a file first.');
+            return;
         }
+
+        analyzeBtn.disabled = true;
+        analyzeBtn.style.opacity = '0.7';
+        analyzeBtn.querySelector('.btn-text').textContent = 'Analyzing...';
+
+        try {
+            await new Promise(resolve => setTimeout(resolve, 250));
+            let report;
+            if (analysisMode.value === 'code') {
+                report = runCodeAnalysis(text);
+                renderCodeResults(report);
+            } else {
+                report = runPlagiarismAnalysis(text);
+                renderPlagiarismResults(report);
+            }
+
+            state.lastReport = report;
+            saveToHistory({
+                mode: analysisMode.value,
+                score: report.score,
+                words: report.words || countWords(text),
+                sources: report.sources?.length || 0,
+                date: new Date().toLocaleString()
+            });
+            showResults();
+        } catch (error) {
+            console.error(error);
+            alert(`Analysis failed: ${error.message}`);
+        } finally {
+            analyzeBtn.disabled = false;
+            analyzeBtn.style.opacity = '1';
+            analyzeBtn.querySelector('.btn-text').textContent = analysisMode.value === 'code' ? 'Analyze Code' : 'Check Plagiarism';
+        }
+    });
+
+    // -----------------------------
+    // Reports
+    // -----------------------------
+    function buildReportHtml() {
+        const report = state.lastReport;
+        if (!report) return null;
+        const mode = state.lastMode;
+        const sourceName = `${mode === 'plagiarism' ? 'Plagiarism' : 'Code'} Analysis Report`;
+        const scoreLabel = mode === 'plagiarism' ? 'Similarity' : 'Heuristic AI Probability';
+        const rows = mode === 'plagiarism'
+            ? `
+                <tr><td>Similarity</td><td>${report.score}%</td></tr>
+                <tr><td>Matching words</td><td>${formatNumber(report.matchedWords)}</td></tr>
+                <tr><td>Reference sources</td><td>${report.sources?.length || 0}</td></tr>
+                <tr><td>Matched phrases</td><td>${formatNumber(report.matchedPhrases)}</td></tr>
+                <tr><td>Words analyzed</td><td>${formatNumber(report.words)}</td></tr>
+              `
+            : `
+                <tr><td>Heuristic AI probability</td><td>${report.score}%</td></tr>
+                <tr><td>Detected language</td><td>${escapeHtml(report.language)}</td></tr>
+                <tr><td>AI-like patterns</td><td>${report.patterns}</td></tr>
+                <tr><td>Logical complexity</td><td>${report.complexity}</td></tr>
+                <tr><td>Comment density</td><td>${report.commentDensity}%</td></tr>
+              `;
+        const sources = (report.sources || []).map(s => `<li>${escapeHtml(s.name)} — ${s.score}%</li>`).join('');
+
+        return `<!doctype html><html><head><meta charset="utf-8"><title>${sourceName}</title>
+        <style>body{font-family:Arial,sans-serif;max-width:850px;margin:40px auto;color:#111;line-height:1.5}h1{margin-bottom:4px}small{color:#666}.score{font-size:42px;font-weight:700;margin:24px 0}table{width:100%;border-collapse:collapse;margin:20px 0}td{padding:10px;border:1px solid #ddd}td:first-child{font-weight:600}li{margin:8px 0}.note{padding:14px;background:#f3f4f6;border-left:4px solid #555}</style></head>
+        <body><h1>${sourceName}</h1><small>Generated by CodeGuard · ${new Date().toLocaleString()}</small>
+        <div class="score">${scoreLabel}: ${report.score}%</div><table>${rows}</table>
+        ${sources ? `<h2>Matching Sources</h2><ul>${sources}</ul>` : ''}
+        <div class="note">${mode === 'plagiarism'
+                ? 'This report measures similarity only against the reference documents supplied to this application. It is not a guarantee of originality and does not search the public internet.'
+                : 'This is a local heuristic code-analysis score. It is not definitive evidence that code was or was not generated by AI.'}</div>
+        </body></html>`;
     }
 
-    // --- Navigation & Panels ---
-    const navScanner = document.getElementById('navScanner');
-    const navHistory = document.getElementById('navHistory');
-    const navSettings = document.getElementById('navSettings');
-    
-    const scannerPanel = document.getElementById('scannerPanel');
-    const historyPanel = document.getElementById('historyPanel');
-    const settingsPanel = document.getElementById('settingsPanel');
-    const historyList = document.getElementById('historyList');
-    const clearHistoryBtn = document.getElementById('clearHistoryBtn');
+    $('downloadReportBtn')?.addEventListener('click', () => {
+        const html = buildReportHtml();
+        if (!html) return alert('Run an analysis first.');
+        const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `codeguard-report-${Date.now()}.html`;
+        a.click();
+        URL.revokeObjectURL(url);
+    });
 
-    // --- Settings Elements ---
-    const settingStrict = document.getElementById('settingStrict');
-    const settingIgnoreComments = document.getElementById('settingIgnoreComments');
-    const settingAutoLang = document.getElementById('settingAutoLang');
-    const saveSettingsBtn = document.getElementById('saveSettingsBtn');
+    $('printReportBtn')?.addEventListener('click', () => {
+        const html = buildReportHtml();
+        if (!html) return alert('Run an analysis first.');
+        const win = window.open('', '_blank', 'width=900,height=700');
+        if (!win) return alert('Please allow pop-ups to print the report.');
+        win.document.write(html);
+        win.document.close();
+        win.focus();
+        setTimeout(() => win.print(), 300);
+    });
 
+    // -----------------------------
+    // History
+    // -----------------------------
+    function saveToHistory(item) {
+        let history = [];
+        try { history = JSON.parse(localStorage.getItem('codeGuardHistory') || '[]'); } catch { }
+        history.unshift({ id: Date.now(), ...item });
+        localStorage.setItem('codeGuardHistory', JSON.stringify(history.slice(0, 50)));
+    }
+
+    function loadHistory() {
+        const list = $('historyList');
+        let history = [];
+        try { history = JSON.parse(localStorage.getItem('codeGuardHistory') || '[]'); } catch { }
+        if (!history.length) {
+            list.innerHTML = '<div class="empty-history">No analysis history found.</div>';
+            $('clearHistoryBtn').classList.add('hidden');
+            return;
+        }
+        $('clearHistoryBtn').classList.remove('hidden');
+        list.innerHTML = history.map(item => {
+            const isPlag = item.mode === 'plagiarism';
+            const color = item.score >= 50 ? 'danger' : item.score >= 20 ? 'warning' : 'safe';
+            return `<div class="history-item"><div class="history-info"><h4>${isPlag ? 'Plagiarism Check' : 'Code Analysis'}</h4><div class="history-meta">${escapeHtml(item.date)} · ${formatNumber(item.words)} words · ${item.sources || 0} reference source(s)</div></div><div class="history-score"><span class="score-value ${color}">${item.score}%</span><span class="status-text ${color}">${isPlag ? 'Similarity' : 'Heuristic'}</span></div></div>`;
+        }).join('');
+    }
+
+    $('clearHistoryBtn')?.addEventListener('click', () => {
+        localStorage.removeItem('codeGuardHistory');
+        loadHistory();
+    });
+
+    // -----------------------------
+    // Navigation
+    // -----------------------------
     function switchTab(tab) {
-        if (navScanner) navScanner.classList.remove('active');
-        if (navHistory) navHistory.classList.remove('active');
-        if (navSettings) navSettings.classList.remove('active');
-        
-        if (scannerPanel) scannerPanel.style.display = 'none';
-        if (resultsPanel) resultsPanel.classList.add('hidden');
-        if (historyPanel) historyPanel.classList.add('hidden');
-        if (settingsPanel) settingsPanel.classList.add('hidden');
+        $('navScanner').classList.remove('active');
+        $('navHistory').classList.remove('active');
+        $('navSettings').classList.remove('active');
+        scannerPanel.style.display = 'none';
+        historyPanel.classList.add('hidden');
+        settingsPanel.classList.add('hidden');
+        resultsPanel.classList.add('hidden');
 
         if (tab === 'scanner') {
-            if (navScanner) navScanner.classList.add('active');
-            if (scannerPanel) scannerPanel.style.display = 'flex';
-            if (resultsPanel && resultsPanel.classList.contains('visible')) {
-                resultsPanel.classList.remove('hidden');
-            }
+            $('navScanner').classList.add('active');
+            scannerPanel.style.display = 'flex';
+            if (state.lastReport) resultsPanel.classList.remove('hidden');
         } else if (tab === 'history') {
-            if (navHistory) navHistory.classList.add('active');
-            if (historyPanel) historyPanel.classList.remove('hidden');
+            $('navHistory').classList.add('active');
+            historyPanel.classList.remove('hidden');
             loadHistory();
-        } else if (tab === 'settings') {
-            if (navSettings) navSettings.classList.add('active');
-            if (settingsPanel) settingsPanel.classList.remove('hidden');
+        } else {
+            $('navSettings').classList.add('active');
+            settingsPanel.classList.remove('hidden');
             loadSettings();
         }
     }
 
-    if (navScanner) navScanner.addEventListener('click', (e) => { e.preventDefault(); switchTab('scanner'); });
-    if (navHistory) navHistory.addEventListener('click', (e) => { e.preventDefault(); switchTab('history'); });
-    if (navSettings) navSettings.addEventListener('click', (e) => { e.preventDefault(); switchTab('settings'); });
+    $('navScanner')?.addEventListener('click', e => { e.preventDefault(); switchTab('scanner'); });
+    $('navHistory')?.addEventListener('click', e => { e.preventDefault(); switchTab('history'); });
+    $('navSettings')?.addEventListener('click', e => { e.preventDefault(); switchTab('settings'); });
 
-    function loadSettings() {
-        const settings = JSON.parse(localStorage.getItem('aiDetectorSettings') || '{"strict": false, "ignoreComments": false, "autoLang": true}');
-        if (settingStrict) settingStrict.checked = settings.strict;
-        if (settingIgnoreComments) settingIgnoreComments.checked = settings.ignoreComments;
-        if (settingAutoLang) settingAutoLang.checked = settings.autoLang;
+    // -----------------------------
+    // Helpers
+    // -----------------------------
+    function formatNumber(value) {
+        return Number(value || 0).toLocaleString();
     }
 
-    if (saveSettingsBtn) {
-        saveSettingsBtn.addEventListener('click', () => {
-            const settings = {
-                strict: settingStrict ? settingStrict.checked : false,
-                ignoreComments: settingIgnoreComments ? settingIgnoreComments.checked : false,
-                autoLang: settingAutoLang ? settingAutoLang.checked : true
-            };
-            localStorage.setItem('aiDetectorSettings', JSON.stringify(settings));
-            
-            const originalText = saveSettingsBtn.innerHTML;
-            saveSettingsBtn.innerHTML = '<span class="btn-text">Saved!</span>';
-            setTimeout(() => {
-                saveSettingsBtn.innerHTML = originalText;
-            }, 1500);
-        });
+    function escapeHtml(value) {
+        return String(value)
+            .replaceAll('&', '&amp;')
+            .replaceAll('<', '&lt;')
+            .replaceAll('>', '&gt;')
+            .replaceAll('"', '&quot;')
+            .replaceAll("'", '&#039;');
     }
 
-    // Load initial settings globally so they are available
     loadSettings();
-
-    function saveToHistory(score, lines) {
-        let history = JSON.parse(localStorage.getItem('aiDetectorHistory') || '[]');
-        history.unshift({
-            id: Date.now(),
-            date: new Date().toLocaleString(),
-            score: score,
-            lines: lines
-        });
-        if (history.length > 50) history = history.slice(0, 50);
-        localStorage.setItem('aiDetectorHistory', JSON.stringify(history));
-    }
-
-    function loadHistory() {
-        if (!historyList) return;
-        const history = JSON.parse(localStorage.getItem('aiDetectorHistory') || '[]');
-        
-        if (history.length === 0) {
-            historyList.innerHTML = '<div class="empty-history">No analysis history found. Run a scan to see results here.</div>';
-            if (clearHistoryBtn) clearHistoryBtn.classList.add('hidden');
-            return;
-        }
-
-        if (clearHistoryBtn) clearHistoryBtn.classList.remove('hidden');
-        historyList.innerHTML = '';
-        
-        history.forEach(item => {
-            let colorClass = 'safe';
-            let status = 'Likely Human';
-            if (item.score >= 40 && item.score < 75) {
-                colorClass = 'warning';
-                status = 'Mixed';
-            } else if (item.score >= 75) {
-                colorClass = 'danger';
-                status = 'Likely AI';
-            }
-
-            const div = document.createElement('div');
-            div.className = 'history-item';
-            div.innerHTML = `
-                <div class="history-info">
-                    <h4>Analysis Report</h4>
-                    <div class="history-meta">${item.date} &bull; ${item.lines} lines analyzed</div>
-                </div>
-                <div class="history-score">
-                    <span class="score-value ${colorClass}">${item.score}%</span>
-                    <span class="status-text ${colorClass}">${status}</span>
-                </div>
-            `;
-            historyList.appendChild(div);
-        });
-    }
-
-    if (clearHistoryBtn) {
-        clearHistoryBtn.addEventListener('click', () => {
-            localStorage.removeItem('aiDetectorHistory');
-            loadHistory();
-        });
-    }
+    setMode('plagiarism');
+    renderReferences();
 });
