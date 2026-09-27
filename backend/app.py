@@ -1,7 +1,7 @@
 import io
 import re
-import requests
 import numpy as np
+import requests
 
 from bs4 import BeautifulSoup
 from fastapi import FastAPI, UploadFile, File
@@ -16,12 +16,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 from sentence_transformers import SentenceTransformer
 
 
-# ---------------------------------------------------------
-# APP
-# ---------------------------------------------------------
-
 app = FastAPI(title="ML Plagiarism Checker")
-
 
 app.add_middleware(
     CORSMiddleware,
@@ -32,33 +27,43 @@ app.add_middleware(
 )
 
 
-# ---------------------------------------------------------
-# LOAD ML MODEL
-# ---------------------------------------------------------
-
 print("Loading Sentence Transformer model...")
-
 model = SentenceTransformer("all-MiniLM-L6-v2")
-
 print("ML model loaded successfully.")
 
 
-# ---------------------------------------------------------
-# DOCUMENT TEXT EXTRACTION
-# ---------------------------------------------------------
+MAX_SOURCE_CHARS = 25000
+MAX_SEARCH_QUERIES = 6
+MAX_RESULTS_PER_QUERY = 5
+
+
+# =========================================================
+# TEXT CLEANING
+# =========================================================
+
+def clean_text(text):
+    text = re.sub(r"\s+", " ", text or "")
+    return text.strip()
+
+
+# =========================================================
+# DOCUMENT EXTRACTION
+# =========================================================
 
 def extract_text(filename, content):
 
-    filename = filename.lower()
+    filename = (filename or "").lower()
 
-    # DOCX
     if filename.endswith(".docx"):
 
-        document = Document(io.BytesIO(content))
+        document = Document(
+            io.BytesIO(content)
+        )
 
         paragraphs = []
 
         for paragraph in document.paragraphs:
+
             text = paragraph.text.strip()
 
             if text:
@@ -66,48 +71,41 @@ def extract_text(filename, content):
 
         return "\n".join(paragraphs)
 
-    # PDF
-    elif filename.endswith(".pdf"):
 
-        pdf = PdfReader(io.BytesIO(content))
+    if filename.endswith(".pdf"):
+
+        pdf = PdfReader(
+            io.BytesIO(content)
+        )
 
         pages = []
 
         for page in pdf.pages:
 
-            text = page.extract_text()
+            text = page.extract_text() or ""
 
-            if text:
+            if text.strip():
                 pages.append(text)
 
         return "\n".join(pages)
 
-    # TXT / MD
-    elif filename.endswith(".txt") or filename.endswith(".md"):
 
-        return content.decode("utf-8", errors="ignore")
+    if filename.endswith(".txt") or filename.endswith(".md"):
 
-    else:
-
-        raise ValueError(
-            "Unsupported file type. Use DOCX, PDF, TXT or MD."
+        return content.decode(
+            "utf-8",
+            errors="ignore"
         )
 
 
-# ---------------------------------------------------------
-# CLEAN TEXT
-# ---------------------------------------------------------
-
-def clean_text(text):
-
-    text = re.sub(r"\s+", " ", text)
-
-    return text.strip()
+    raise ValueError(
+        "Unsupported file type. Use DOCX, PDF, TXT or MD."
+    )
 
 
-# ---------------------------------------------------------
-# SENTENCE SPLITTER
-# ---------------------------------------------------------
+# =========================================================
+# SENTENCES
+# =========================================================
 
 def split_sentences(text):
 
@@ -116,49 +114,96 @@ def split_sentences(text):
         text
     )
 
-    sentences = [
+    return [
         s.strip()
         for s in sentences
-        if len(s.strip()) > 20
+        if len(s.strip()) >= 30
     ]
 
-    return sentences
 
-
-# ---------------------------------------------------------
-# CREATE PHRASES
-# ---------------------------------------------------------
+# =========================================================
+# SIX WORD PHRASES
+# =========================================================
 
 def create_phrases(text, n=6):
 
     words = re.findall(
-        r"\b[a-zA-Z0-9]+\b",
+        r"\b\w+\b",
         text.lower()
     )
 
-    phrases = []
+    if len(words) < n:
+        return []
 
-    for i in range(len(words) - n + 1):
-
-        phrase = " ".join(
+    return [
+        " ".join(
             words[i:i+n]
         )
+        for i in range(
+            len(words) - n + 1
+        )
+    ]
 
-        phrases.append(phrase)
 
-    return phrases
+# =========================================================
+# EXACT PHRASE MATCHING
+# =========================================================
+
+def phrase_matching(
+    document_text,
+    source_text
+):
+
+    document_phrases = set(
+        create_phrases(
+            document_text,
+            6
+        )
+    )
+
+    source_phrases = set(
+        create_phrases(
+            source_text,
+            6
+        )
+    )
+
+    if not document_phrases:
+
+        return 0.0, [], 0
+
+    matched = sorted(
+        document_phrases.intersection(
+            source_phrases
+        )
+    )
+
+    score = (
+        len(matched) /
+        len(document_phrases)
+    ) * 100
+
+    return (
+        min(score, 100),
+        matched[:20],
+        len(matched)
+    )
 
 
-# ---------------------------------------------------------
-# TF-IDF SIMILARITY
-# ---------------------------------------------------------
+# =========================================================
+# TF-IDF
+# =========================================================
 
-def tfidf_similarity(document_text, source_text):
+def tfidf_similarity(
+    document_text,
+    source_text
+):
 
     try:
 
         vectorizer = TfidfVectorizer(
-            stop_words="english"
+            stop_words="english",
+            max_features=15000
         )
 
         vectors = vectorizer.fit_transform(
@@ -173,142 +218,150 @@ def tfidf_similarity(document_text, source_text):
             vectors[1:2]
         )[0][0]
 
-        return float(score * 100)
+        return float(
+            score * 100
+        )
 
     except Exception:
 
         return 0.0
 
 
-# ---------------------------------------------------------
-# SEMANTIC ML SIMILARITY
-# ---------------------------------------------------------
+# =========================================================
+# CHUNK TEXT FOR ML
+# =========================================================
 
-def semantic_similarity(document_text, source_text):
+def chunk_text(
+    text,
+    words_per_chunk=120
+):
 
-    document_embedding = model.encode(
-        document_text,
+    words = text.split()
+
+    chunks = []
+
+    for i in range(
+        0,
+        len(words),
+        words_per_chunk
+    ):
+
+        chunk = words[
+            i:i + words_per_chunk
+        ]
+
+        if len(chunk) >= 20:
+
+            chunks.append(
+                " ".join(chunk)
+            )
+
+    return chunks
+
+
+# =========================================================
+# SENTENCE TRANSFORMER
+# =========================================================
+
+def semantic_similarity(
+    document_text,
+    source_text
+):
+
+    document_chunks = chunk_text(
+        document_text
+    )[:80]
+
+    source_chunks = chunk_text(
+        source_text
+    )[:120]
+
+    if (
+        not document_chunks
+        or not source_chunks
+    ):
+
+        return 0.0
+
+
+    document_embeddings = model.encode(
+        document_chunks,
         convert_to_numpy=True,
-        normalize_embeddings=True
+        normalize_embeddings=True,
+        show_progress_bar=False
     )
 
-    source_embedding = model.encode(
-        source_text,
+
+    source_embeddings = model.encode(
+        source_chunks,
         convert_to_numpy=True,
-        normalize_embeddings=True
+        normalize_embeddings=True,
     )
 
-    score = np.dot(
-        document_embedding,
-        source_embedding
+
+    matrix = np.matmul(
+        document_embeddings,
+        source_embeddings.T
     )
 
-    score = max(0, min(1, float(score)))
-
-    return score * 100
-
-
-# ---------------------------------------------------------
-# EXACT PHRASE MATCHING
-# ---------------------------------------------------------
-
-def phrase_matching(document_text, source_text):
-
-    document_phrases = set(
-        create_phrases(document_text)
+    matrix = np.clip(
+        matrix,
+        -1,
+        1
     )
 
-    source_phrases = set(
-        create_phrases(source_text)
+
+    best_matches = np.max(
+        matrix,
+        axis=1
     )
 
-    if not document_phrases:
-
-        return 0, []
-
-    matched = document_phrases.intersection(
-        source_phrases
+    best_matches = np.maximum(
+        best_matches,
+        0
     )
 
-    percentage = (
-        len(matched) /
-        len(document_phrases)
-    ) * 100
 
-    return percentage, list(matched)[:20]
-
-
-# ---------------------------------------------------------
-# FETCH WEBPAGE
-# ---------------------------------------------------------
-
-def fetch_webpage(url):
-
-    try:
-
-        headers = {
-            "User-Agent":
-            "Mozilla/5.0"
-        }
-
-        response = requests.get(
-            url,
-            headers=headers,
-            timeout=10
+    # strongest 25% of document chunks
+    k = max(
+        1,
+        int(
+            np.ceil(
+                len(best_matches) * 0.25
+            )
         )
+    )
 
-        if response.status_code != 200:
-            return ""
-
-        soup = BeautifulSoup(
-            response.text,
-            "html.parser"
-        )
-
-        # Remove unnecessary HTML
-        for tag in soup([
-            "script",
-            "style",
-            "nav",
-            "footer",
-            "header"
-        ]):
-
-            tag.decompose()
-
-        text = soup.get_text(
-            separator=" "
-        )
-
-        text = clean_text(text)
-
-        return text[:100000]
-
-    except Exception:
-
-        return ""
+    strongest = np.sort(
+        best_matches
+    )[-k:]
 
 
-# ---------------------------------------------------------
-# SEARCH WEB
-# ---------------------------------------------------------
+    score = (
+        np.mean(strongest) * 100
+    )
+
+    return min(
+        float(score),
+        100
+    )
+
+
+# =========================================================
+# WEB SEARCH
+# =========================================================
 
 def search_web(query):
 
-    """
-    Uses DuckDuckGo HTML search.
-
-    For production use, replace this with
-    an official search API.
-    """
-
     try:
 
-        url = "https://html.duckduckgo.com/html/"
+        url = (
+            "https://html.duckduckgo.com/html/"
+        )
 
         headers = {
             "User-Agent":
-            "Mozilla/5.0"
+                "Mozilla/5.0"
         }
 
         response = requests.post(
@@ -317,8 +370,10 @@ def search_web(query):
                 "q": query
             },
             headers=headers,
-            timeout=10
+            timeout=15
         )
+
+        response.raise_for_status()
 
         soup = BeautifulSoup(
             response.text,
@@ -329,7 +384,7 @@ def search_web(query):
 
         for result in soup.select(
             ".result"
-        )[:5]:
+        )[:MAX_RESULTS_PER_QUERY]:
 
             link = result.select_one(
                 ".result__a"
@@ -339,102 +394,241 @@ def search_web(query):
                 ".result__snippet"
             )
 
-            if link:
+            if not link:
+                continue
 
-                title = link.get_text(
-                    " ",
-                    strip=True
-                )
 
-                href = link.get(
-                    "href"
-                )
+            results.append({
 
-                description = ""
+                "title":
+                    link.get_text(
+                        " ",
+                        strip=True
+                    ),
 
-                if snippet:
-                    description = snippet.get_text(
+                "url":
+                    link.get(
+                        "href",
+                        ""
+                    ),
+
+                "snippet":
+                    snippet.get_text(
                         " ",
                         strip=True
                     )
+                    if snippet
+                    else ""
+            })
 
-                results.append({
-                    "title": title,
-                    "url": href,
-                    "snippet": description
-                })
 
         return results
 
-    except Exception as e:
 
-        print("Search error:", e)
+    except Exception as error:
+
+        print(
+            "Web search error:",
+            error
+        )
 
         return []
 
 
-# ---------------------------------------------------------
-# GENERATE SEARCH QUERIES
-# ---------------------------------------------------------
+# =========================================================
+# SEARCH QUERY GENERATION
+# =========================================================
 
 def generate_queries(text):
 
-    sentences = split_sentences(text)
+    sentences = split_sentences(
+        text
+    )
 
     queries = []
 
-    # Use distinctive sentences
-    for sentence in sentences[:8]:
+    seen = set()
+
+
+    for sentence in sentences:
 
         words = sentence.split()
 
-        if len(words) >= 8:
+        if len(words) < 8:
+            continue
 
-            query = " ".join(
-                words[:18]
+
+        query = " ".join(
+            words[:18]
+        )
+
+        key = query.lower()
+
+
+        if key not in seen:
+
+            seen.add(key)
+
+            queries.append(
+                query
             )
 
-            queries.append(query)
+
+        if len(queries) >= MAX_SEARCH_QUERIES:
+
+            break
+
 
     return queries
 
 
-# ---------------------------------------------------------
+# =========================================================
+# FETCH WEBPAGE
+# =========================================================
+
+def fetch_webpage(url):
+
+    try:
+
+        if not url.startswith(
+            (
+                "http://",
+                "https://"
+            )
+        ):
+
+            return ""
+
+
+        headers = {
+            "User-Agent":
+                "Mozilla/5.0"
+        }
+
+
+        response = requests.get(
+            url,
+            headers=headers,
+            timeout=12
+        )
+
+
+        if response.status_code != 200:
+
+            return ""
+
+
+        content_type = (
+            response
+            .headers
+            .get(
+                "content-type",
+                ""
+            )
+            .lower()
+        )
+
+
+        if "text/html" not in content_type:
+
+            return ""
+
+
+        soup = BeautifulSoup(
+            response.text,
+            "html.parser"
+        )
+
+
+        for tag in soup([
+            "script",
+            "style",
+            "nav",
+            "footer",
+            "header",
+            "noscript"
+        ]):
+
+            tag.decompose()
+
+
+        text = clean_text(
+            soup.get_text(
+                separator=" "
+            )
+        )
+
+
+        return text[
+            :MAX_SOURCE_CHARS
+        ]
+
+
+    except Exception as error:
+
+        print(
+            "Source fetch error:",
+            error
+        )
+
+        return ""
+
+
+# =========================================================
 # FIND ONLINE SOURCES
-# ---------------------------------------------------------
+# =========================================================
 
 def find_sources(text):
 
-    queries = generate_queries(text)
-
     sources = {}
 
-    for query in queries:
+
+    for query in generate_queries(text):
 
         print(
             "Searching:",
             query
         )
 
-        results = search_web(query)
 
-        for result in results:
+        search_results = search_web(
+            query
+        )
 
-            url = result["url"]
+
+        for result in search_results:
+
+            url = result.get(
+                "url",
+                ""
+            )
+
+
+            if not url:
+                continue
+
 
             if url in sources:
                 continue
+
 
             source_text = fetch_webpage(
                 url
             )
 
-            if len(source_text) < 100:
+
+            if len(source_text) < 200:
+
                 continue
 
+
             sources[url] = {
+
                 "title":
-                    result["title"],
+                    result.get(
+                        "title",
+                        "Online Source"
+                    ),
 
                 "url":
                     url,
@@ -443,14 +637,15 @@ def find_sources(text):
                     source_text
             }
 
+
     return list(
         sources.values()
     )
 
 
-# ---------------------------------------------------------
+# =========================================================
 # ANALYZE SOURCE
-# ---------------------------------------------------------
+# =========================================================
 
 def analyze_source(
     document_text,
@@ -459,29 +654,41 @@ def analyze_source(
 
     source_text = source["text"]
 
+
     tfidf_score = tfidf_similarity(
         document_text,
         source_text
     )
+
 
     semantic_score = semantic_similarity(
         document_text,
         source_text
     )
 
-    phrase_score, matched_phrases = (
+
+    phrase_score, matched_phrases, phrase_count = (
         phrase_matching(
             document_text,
             source_text
         )
     )
 
-    # Hybrid ML score
+
+    # ML-heavy combined score
     final_score = (
-        tfidf_score * 0.25 +
-        semantic_score * 0.50 +
+        semantic_score * 0.55
+        +
+        tfidf_score * 0.20
+        +
         phrase_score * 0.25
     )
+
+
+    matched_words = (
+        len(matched_phrases) * 6
+    )
+
 
     return {
 
@@ -491,28 +698,51 @@ def analyze_source(
         "url":
             source["url"],
 
-        "tfidf_similarity":
-            round(tfidf_score, 2),
+        "similarity":
+            round(
+                min(
+                    final_score,
+                    100
+                ),
+                2
+            ),
 
         "semantic_similarity":
-            round(semantic_score, 2),
+            round(
+                semantic_score,
+                2
+            ),
+
+        "tfidf_similarity":
+            round(
+                tfidf_score,
+                2
+            ),
 
         "phrase_similarity":
-            round(phrase_score, 2),
-
-        "similarity":
-            round(final_score, 2),
+            round(
+                phrase_score,
+                2
+            ),
 
         "matched_phrases":
-            matched_phrases
+            matched_phrases,
+
+        "matched_phrase_count":
+            phrase_count,
+
+        "matched_words":
+            matched_words
     }
 
 
-# ---------------------------------------------------------
-# MAIN API
-# ---------------------------------------------------------
+# =========================================================
+# MAIN PLAGIARISM API
+# =========================================================
 
-@app.post("/api/check-plagiarism")
+@app.post(
+    "/api/check-plagiarism"
+)
 async def check_plagiarism(
     file: UploadFile = File(...)
 ):
@@ -521,30 +751,44 @@ async def check_plagiarism(
 
         content = await file.read()
 
-        # Extract document
-        text = extract_text(
-            file.filename,
-            content
+
+        text = clean_text(
+            extract_text(
+                file.filename or "",
+                content
+            )
         )
 
-        text = clean_text(text)
 
         if len(text) < 50:
 
             return {
-                "success": False,
+
+                "success":
+                    False,
+
                 "error":
                     "Document contains insufficient text."
             }
 
+
         words = text.split()
 
-        # Search Internet
+
+        print(
+            "Document words:",
+            len(words)
+        )
+
+
+        # Search automatically
         sources = find_sources(
             text
         )
 
+
         results = []
+
 
         for source in sources:
 
@@ -555,54 +799,105 @@ async def check_plagiarism(
                     source
                 )
 
-                results.append(result)
+                results.append(
+                    result
+                )
 
-            except Exception as e:
+            except Exception as error:
 
                 print(
                     "Source analysis error:",
-                    e
+                    error
                 )
 
-        # Sort by similarity
+
         results.sort(
             key=lambda x:
                 x["similarity"],
             reverse=True
         )
 
-        # Top source
-        highest_score = 0
 
-        if results:
+        # Keep meaningful matches
+        meaningful_results = [
+            result
+            for result in results
+            if result["similarity"] >= 15
+        ]
 
-            highest_score = results[0][
-                "similarity"
-            ]
 
-        # ------------------------------------------------
-        # STATUS
-        # ------------------------------------------------
+        top_results = (
+            meaningful_results[:10]
+        )
 
-        if highest_score >= 70:
 
-            status = "HIGH SIMILARITY"
+        if top_results:
 
-        elif highest_score >= 40:
-
-            status = "POTENTIAL PLAGIARISM"
-
-        elif highest_score >= 20:
-
-            status = "SOME SIMILARITY"
+            highest_score = (
+                top_results[0]["similarity"]
+            )
 
         else:
 
-            status = "NO SIGNIFICANT MATCH"
+            highest_score = 0
+
+
+        matched_phrases = sum(
+            result.get(
+                "matched_phrase_count",
+                0
+            )
+            for result in top_results
+        )
+
+
+        matched_words = min(
+
+            len(words),
+
+            sum(
+                result.get(
+                    "matched_words",
+                    0
+                )
+                for result in top_results
+            )
+        )
+
+
+        # =================================================
+        # STATUS
+        # =================================================
+
+        if highest_score >= 70:
+
+            status = (
+                "HIGH SIMILARITY"
+            )
+
+        elif highest_score >= 40:
+
+            status = (
+                "POTENTIAL PLAGIARISM"
+            )
+
+        elif highest_score >= 20:
+
+            status = (
+                "SOME SIMILARITY"
+            )
+
+        else:
+
+            status = (
+                "NO SIGNIFICANT MATCH"
+            )
+
 
         return {
 
-            "success": True,
+            "success":
+                True,
 
             "filename":
                 file.filename,
@@ -613,6 +908,12 @@ async def check_plagiarism(
             "sources_checked":
                 len(results),
 
+            "matchedWords":
+                matched_words,
+
+            "matchedPhrases":
+                matched_phrases,
+
             "similarity":
                 highest_score,
 
@@ -620,30 +921,37 @@ async def check_plagiarism(
                 status,
 
             "results":
-                results[:10]
-
+                top_results
         }
 
-    except Exception as e:
+
+    except Exception as error:
+
+        print(
+            "API error:",
+            error
+        )
+
 
         return {
 
-            "success": False,
+            "success":
+                False,
 
             "error":
-                str(e)
-
+                str(error)
         }
 
 
-# ---------------------------------------------------------
-# HEALTH CHECK
-# ---------------------------------------------------------
+# =========================================================
+# SERVER TEST
+# =========================================================
 
 @app.get("/")
 def home():
 
     return {
+
         "message":
             "ML Plagiarism Checker API is running"
     }
